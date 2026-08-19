@@ -1,5 +1,18 @@
 # Changelog
 
+## v3.9 — configurable discovery, settings page, external @ paths
+
+- **Settings is now a first-class page** at `/app/settings` rather than a modal. It uses the same application shell as conversations and remains responsive on mobile.
+- Settings is organized into tabs, beginning with **General**. The page has a sticky **Save / Discard** action bar so changes are explicit.
+- **Workspace discovery is configurable** with any number of rules. Each rule can be:
+  - a specific folder such as `/home/joy/project1`
+  - a folder plus a per-rule recursive depth (`0` means only that exact workspace)
+  - a regular expression matched against absolute workspace paths, such as `^/home/joy/(project1|project2)$`
+- Saving discovery settings persists them in `~/.claude-harness/settings.json`, rescans Claude transcripts, and refreshes the sidebar immediately. A separate **Rescan** action reruns the currently saved rules at any time.
+- Central Claude transcript storage is still inspected, but sessions are surfaced only when their real workspace path matches the configured rules and the project folder still exists.
+- The `@` picker can now browse **outside the active workspace** with absolute or home-relative paths. Examples: `@/home/joy/project1/`, `~/project1/`, and partial names inside those directories. Hidden files and `.gitignore` rules remain excluded.
+- **Bypass permissions** now launches Claude with its dedicated bypass CLI mode and does not register Harness approval hooks for normal permission boundaries. Human-input requests such as `AskUserQuestion` remain interactive because they require an answer rather than permission.
+
 ## v3.8 — live first turn, stable session handoff, completion sounds
 
 - A brand-new session now promotes its first prompt directly to the active runtime instead of briefly presenting it as a queued follow-up. The chat immediately shows the sent user bubble followed by **Claude is writing**.
