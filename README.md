@@ -137,6 +137,7 @@ The login cookie is HttpOnly and SameSite=Strict. `CH_USER` and `CH_PASSWORD` ar
 | Shortcut | Action |
 |---|---|
 | `Ctrl/Cmd+B` | Toggle sidebar |
+| `Ctrl/Cmd+Shift+B` | Toggle session notepad (right sidebar) |
 | `Ctrl/Cmd+M` | Focus active sidebar item |
 | `Ctrl/Cmd+N` | New session in current workspace |
 | `↑` / `↓` | Navigate sidebar items / prompt history |
@@ -207,6 +208,8 @@ Harness stores its own state under `~/.claude-harness/`:
 runtime-state.json      background jobs and queued prompts
 session-names.json      UI session rename overrides
 permission-rules.json   Harness fallback always-allow rules
+ui-state.json           prompt drafts and session notepad notes
+settings.json           workspace discovery rules
 ```
 
 Claude's original JSONL transcripts remain in Claude Code's normal storage.

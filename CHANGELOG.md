@@ -1,5 +1,16 @@
 # Changelog
 
+## v4.0 — persistent drafts, resizable composer, session notepad
+
+- The prompt composer is vertically resizable. Its height is remembered across sessions in the browser.
+- Unsent prompt text is now persisted per Claude session. Switching sessions gives each session its own draft; returning restores it. Drafts are saved to the Harness server with last-write-wins semantics so a browser restart or another device can restore the latest saved text.
+- New-session drafts are stored separately per workspace until the first prompt is sent.
+- Added a **session notepad** as a right sidebar. It is collapsed by default, opens from the top-right panel icon, and toggles with **Ctrl/Cmd+Shift+B**.
+- The notepad is resizable on desktop and becomes a touch-friendly slide-over panel on mobile. Its width is remembered locally.
+- Notes are WYSIWYG text-only (bold, italic, underline, headings, lists, quotes, clear formatting). Image/media pastes are excluded.
+- Notes are persisted per session on the Harness server with the same cross-browser/device last-write-wins behavior as prompt drafts.
+- Server-side draft/note state is stored in `~/.claude-harness/ui-state.json`.
+
 ## v3.9 — configurable discovery, settings page, external @ paths
 
 - **Settings is now a first-class page** at `/app/settings` rather than a modal. It uses the same application shell as conversations and remains responsive on mobile.
