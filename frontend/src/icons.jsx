@@ -30,6 +30,7 @@ export const ToolIcon = icon(<><path d="M14.7 6.3a4 4 0 0 0-5-5l2.1 2.1-2.8 2.8-
 export const XIcon = icon(<><path d="m6 6 12 12M18 6 6 18"/></>);
 export const InfoIcon = icon(<><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></>);
 export const SidebarIcon = icon(<><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></>);
+export const PanelRightIcon = icon(<><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></>);
 export const ListIcon = icon(<><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r="1" fill="currentColor" stroke="none"/><circle cx="4" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="4" cy="18" r="1" fill="currentColor" stroke="none"/></>);
 export const TreeIcon = icon(<><path d="M5 4v12a2 2 0 0 0 2 2h3"/><path d="M5 9h5"/><path d="M5 14h5"/><rect x="10" y="6" width="9" height="5" rx="1"/><rect x="10" y="13" width="9" height="5" rx="1"/></>);
 export const FileIcon = icon(<><path d="M6 3h8l4 4v14H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M14 3v5h5"/></>);

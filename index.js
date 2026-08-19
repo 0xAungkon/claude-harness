@@ -11,6 +11,7 @@ const { exec, spawn } = require('child_process');
 const { MAX_DEPTH, SKIP_DIRS, createScanner, firstUsefulName } = require('./lib/claude');
 const { listProjectFiles, searchProjectFiles } = require('./lib/file-index');
 const { RuntimeStore } = require('./lib/runtime-state');
+const { UiStateStore } = require('./lib/ui-state');
 const { aggregateStats, analyzeTranscriptFile, listSkills } = require('./lib/stats');
 const { WebSocketServer, WebSocket } = require('ws');
 
@@ -530,6 +531,7 @@ async function main() {
   const FILE_INDEX_TTL_MS = 5000;
   const harnessStateDir = path.join(os.homedir(), '.claude-harness');
   const runtimeStore = new RuntimeStore(path.join(harnessStateDir, 'runtime-state.json'));
+  const uiStateStore = new UiStateStore(path.join(harnessStateDir, 'ui-state.json'));
   const sessionNamesPath = path.join(harnessStateDir, 'session-names.json');
   const permissionRulesPath = path.join(harnessStateDir, 'permission-rules.json');
   const statusMetricsPath = path.join(harnessStateDir, 'session-metrics.json');
@@ -1650,6 +1652,27 @@ async function main() {
     try { return res.json(handleApprovalResponse(req.params.id, req.body || {})); }
     catch (error) { return res.status(404).json({ error: error.message || 'This approval request is no longer pending.' }); }
   });
+
+  app.get('/api/ui-state', (req, res) => {
+    const kind = String(req.query?.kind || '');
+    const key = String(req.query?.key || '');
+    if (!key || (kind !== 'draft' && kind !== 'note')) return res.status(400).json({ error: 'kind and key are required.' });
+    return res.json({ kind, key, ...(uiStateStore.get(kind, key) || { value: '', updatedAt: null }) });
+  });
+
+  const saveUiState = (req, res) => {
+    try {
+      const kind = String(req.body?.kind || '');
+      const key = String(req.body?.key || '');
+      if (!key || (kind !== 'draft' && kind !== 'note')) return res.status(400).json({ error: 'kind and key are required.' });
+      const saved = uiStateStore.set(kind, key, req.body?.value ?? '');
+      return res.json({ ok: true, kind, key, ...saved });
+    } catch (error) {
+      return res.status(400).json({ error: error.message || 'Unable to save UI state.' });
+    }
+  };
+  app.put('/api/ui-state', saveUiState);
+  app.post('/api/ui-state', saveUiState);
 
   app.get('/api/workspaces', (_req, res) => res.json(publicWorkspaces()));
   app.get('/api/meta', (_req, res) => res.json(scanMeta));

@@ -5,7 +5,7 @@ import StatsView from './StatsView';
 import ExtensionsManager from './ExtensionsManager';
 import { AgentWriting, QueuePanel } from './PromptQueue';
 import {
-  CopyIcon, ToolIcon, FolderIcon, MenuIcon, SunIcon, MoonIcon, ForkIcon
+  CopyIcon, ToolIcon, FolderIcon, MenuIcon, SunIcon, MoonIcon, ForkIcon, PanelRightIcon
 } from '../icons';
 
 function sameLocalDay(a, b) {
@@ -415,7 +415,8 @@ export default function SessionView({
   models, model, onModelChange, permissionMode, onPermissionModeChange, additionalDirs, onAddDir,
   approval = null, onRespondApproval = async () => {}, socketConnected = false, socketReconnecting = false,
   theme = 'light', onToggleTheme = () => {}, onOpenSidebar = () => {}, onNewSession = () => {},
-  onRenameSession = async () => {}, onStop = async () => {}, onBtw = async () => {}, onForkMessage = async () => {}
+  onRenameSession = async () => {}, onStop = async () => {}, onBtw = async () => {}, onForkMessage = async () => {},
+  notesOpen = false, onToggleNotes = () => {}
 }) {
   const [now, setNow] = useState(Date.now());
   const [notice, setNotice] = useState('');
@@ -638,6 +639,15 @@ export default function SessionView({
               <button onClick={copyWorkspacePath} className="rounded p-0.5 hover:bg-harness-hover" title={`Copy workspace path: ${projectPath}`}><CopyIcon className="h-3 w-3" /></button>
             </div>
           </div>
+          <button
+            type="button"
+            onClick={onToggleNotes}
+            className={`theme-toggle flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-harness-border bg-harness-panel shadow-sm transition hover:bg-harness-hover ${notesOpen ? 'text-harness-accent' : 'text-harness-muted hover:text-harness-primary'}`}
+            aria-label={notesOpen ? 'Collapse session notepad' : 'Open session notepad'}
+            title="Session notepad · Ctrl+Shift+B"
+          >
+            <PanelRightIcon className="h-4 w-4" />
+          </button>
           <button type="button" onClick={onToggleTheme} className="theme-toggle flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-harness-border bg-harness-panel text-harness-muted shadow-sm transition hover:bg-harness-hover hover:text-harness-primary" aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>
             {theme === 'dark' ? <SunIcon className="h-4 w-4" /> : <MoonIcon className="h-4 w-4" />}
           </button>
@@ -698,7 +708,8 @@ export default function SessionView({
           className="pointer-events-auto mx-auto w-full max-w-[760px]" models={models} model={model} onModelChange={onModelChange}
           permissionMode={permissionMode} onPermissionModeChange={onPermissionModeChange} additionalDirs={additionalDirs} onAddDir={onAddDir}
           onLocalNotice={setNotice} approval={approval} onRespondApproval={onRespondApproval} contextPercent={contextPercent}
-          historyKey={session.claudeSessionId || session.id} historyItems={(session.turns || []).filter((turn) => turn.role === 'user').map((turn) => turn.content)}
+          historyKey={session.claudeSessionId || session.id} draftKey={session.claudeSessionId || session.id}
+          historyItems={(session.turns || []).filter((turn) => turn.role === 'user').map((turn) => turn.content)}
         />
         {notice && <div className="pointer-events-auto mx-auto mt-1.5 w-full max-w-[760px] text-center text-[12px] font-medium text-harness-accent">{notice}</div>}
       </div>

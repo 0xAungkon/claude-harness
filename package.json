@@ -1,8 +1,8 @@
 {
   "name": "claude-harness",
-  "version": "3.9.0",
+  "version": "4.0.0",
   "private": true,
-  "description": "Claude Code Harness with configurable folder/regex workspace discovery, full-page settings, external @path browsing, persistent background queues, reconnectable WebSocket state, optional authentication, and single-binary production build.",
+  "description": "Claude Code Harness with persistent per-session drafts and notes, resizable dual sidebars and composer, background queues, reconnectable WebSocket state, optional authentication, and single-binary production build.",
   "bin": "index.js",
   "scripts": {
     "dev": "node scripts/dev.js",
@@ -14,7 +14,7 @@
     "start:no-open": "node index.js --no-open",
     "claude-harness": "npm start",
     "binary": "npm run build && pkg . --compress GZip",
-    "test": "node tests/parser.test.js && node tests/runtime.test.js && node tests/stats.test.js"
+    "test": "node tests/parser.test.js && node tests/runtime.test.js && node tests/stats.test.js && node tests/ui-state.test.js"
   },
   "dependencies": {
     "express": "4.21.2",

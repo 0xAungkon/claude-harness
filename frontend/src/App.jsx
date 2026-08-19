@@ -4,6 +4,7 @@ import EmptyState from './components/EmptyState';
 import SessionView from './components/SessionView';
 import SettingsPage from './components/SettingsPage';
 import LoginScreen from './components/LoginScreen';
+import SessionNotesSidebar from './components/SessionNotesSidebar';
 import useHarnessSocket from './useHarnessSocket';
 
 let harnessAudioContext = null;
@@ -90,6 +91,11 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [sidebarFocusRequest, setSidebarFocusRequest] = useState(0);
+  const [rightSidebarOpen, setRightSidebarOpen] = useState(false);
+  const [rightSidebarWidth, setRightSidebarWidth] = useState(() => {
+    const stored = Number(readStored('claude-harness.notes-width', 360));
+    return Number.isFinite(stored) ? Math.max(280, Math.min(560, stored)) : 360;
+  });
   const [theme, setTheme] = useState(() => readStored('claude-harness.theme', 'light'));
   const [newSessionKey, setNewSessionKey] = useState(0);
   const [model, setModel] = useState(() => readStored('claude-harness.model', 'default'));
@@ -110,6 +116,7 @@ export default function App() {
   useEffect(() => { try { localStorage.setItem('claude-harness.permission-mode', JSON.stringify(permissionMode)); } catch {} }, [permissionMode]);
   useEffect(() => { try { localStorage.setItem('claude-harness.additional-dirs', JSON.stringify(additionalDirs)); } catch {} }, [additionalDirs]);
   useEffect(() => { try { localStorage.setItem('claude-harness.theme', JSON.stringify(theme)); } catch {} }, [theme]);
+  useEffect(() => { try { localStorage.setItem('claude-harness.notes-width', JSON.stringify(rightSidebarWidth)); } catch {} }, [rightSidebarWidth]);
 
   useEffect(() => {
     const unlock = () => unlockHarnessAudio();
@@ -159,6 +166,7 @@ export default function App() {
   const logout = async () => {
     try { await fetch('/api/auth/logout', { method: 'POST' }); } catch { /* local state still signs out */ }
     setSettingsOpen(false);
+    setRightSidebarOpen(false);
     setSelected(null);
     setApprovals([]);
     setRuntimeStates({});
@@ -280,7 +288,10 @@ export default function App() {
     const onGlobalShortcut = (event) => {
       if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
       const key = String(event.key || '').toLowerCase();
-      if (key === 'b') {
+      if (key === 'b' && event.shiftKey) {
+        event.preventDefault();
+        if (selectedRef.current) setRightSidebarOpen((value) => !value);
+      } else if (key === 'b') {
         event.preventDefault();
         if (window.matchMedia('(max-width: 767px)').matches) setMobileSidebarOpen((value) => !value);
         else setSidebarCollapsed((value) => !value);
@@ -550,11 +561,13 @@ export default function App() {
   };
 
   const newSession = (workspace = null) => {
+    setRightSidebarOpen(false);
     setSettingsOpen(false); setSelected(null); setError(''); if (workspace) setSelectedWorkspace(workspace); setMobileSidebarOpen(false); setNewSessionKey((value) => value + 1);
     navigatePath('/app');
   };
 
   const openSettings = () => {
+    setRightSidebarOpen(false);
     setSettingsOpen(true);
     setMobileSidebarOpen(false);
     navigatePath('/app/settings');
@@ -619,7 +632,8 @@ export default function App() {
             approval={activeApproval} onRespondApproval={respondApproval}
             socketConnected={socket.connected} socketReconnecting={socket.reconnecting}
             theme={theme} onToggleTheme={toggleTheme} onOpenSidebar={() => setMobileSidebarOpen(true)} onNewSession={newSession} onRenameSession={renameSession}
-            onStop={stopSession} onBtw={askBtw} onForkMessage={(turn) => forkSession(selected, turn?.timestamp || null)} {...composerProps}
+            onStop={stopSession} onBtw={askBtw} onForkMessage={(turn) => forkSession(selected, turn?.timestamp || null)}
+            notesOpen={rightSidebarOpen} onToggleNotes={() => setRightSidebarOpen((value) => !value)} {...composerProps}
           />
         ) : (
           <EmptyState
@@ -629,6 +643,15 @@ export default function App() {
         )}
       </main>
 
+      <SessionNotesSidebar
+        key={selected?.claudeSessionId || selected?.id || 'no-session'}
+        open={Boolean(rightSidebarOpen && selected && !settingsOpen)}
+        sessionKey={selected?.claudeSessionId || selected?.id || ''}
+        sessionName={selected?.name || 'Session'}
+        width={rightSidebarWidth}
+        onWidthChange={setRightSidebarWidth}
+        onClose={() => setRightSidebarOpen(false)}
+      />
     </div>
   );
 }

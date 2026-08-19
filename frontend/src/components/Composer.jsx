@@ -4,6 +4,7 @@ import {
   MarkdownFileIcon, TextFileIcon, ImageFileIcon, StopIcon
 } from '../icons';
 import InlineApproval from './InlineApproval';
+import usePersistentField from '../usePersistentField';
 
 const COMMANDS = [
   { name: '/init', description: 'Create a CLAUDE.md guide for this project' },
@@ -152,14 +153,17 @@ export default function Composer({
   contextPercent = 0,
   onStop = async () => {},
   historyKey = '',
-  historyItems = []
+  historyItems = [],
+  draftKey = ''
 }) {
   const internalRef = useRef(null);
   const backdropRef = useRef(null);
   const textareaRef = inputRef || internalRef;
-  const [localValue, setLocalValue] = useState(() => typeof controlledValue === 'string' ? controlledValue : '');
-  const value = typeof controlledValue === 'string' ? controlledValue : localValue;
-  const onChange = typeof controlledOnChange === 'function' ? controlledOnChange : setLocalValue;
+  const persistenceKey = draftKey || historyKey || '';
+  const persistedDraft = usePersistentField('draft', persistenceKey, { fallback: '', debounceMs: 220 });
+  const isControlled = typeof controlledValue === 'string' && typeof controlledOnChange === 'function';
+  const value = isControlled ? controlledValue : persistedDraft.value;
+  const onChange = isControlled ? controlledOnChange : persistedDraft.setValue;
   const [promptHistory, setPromptHistory] = useState(() => readPromptHistory(historyKey, historyItems));
   const historySeedVersion = `${historyItems.length}:${String(historyItems.at?.(-1) || '').slice(-160)}`;
   const [historyIndex, setHistoryIndex] = useState(null);
@@ -175,6 +179,24 @@ export default function Composer({
   const [suppressed, setSuppressed] = useState(false);
   const [modeOpen, setModeOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
+
+  useEffect(() => {
+    const node = textareaRef.current;
+    if (!node) return undefined;
+    let saved = 112;
+    try {
+      const parsed = Number(localStorage.getItem('claude-harness.composer-height'));
+      if (Number.isFinite(parsed)) saved = Math.max(64, Math.min(420, parsed));
+    } catch { /* default height */ }
+    node.style.height = `${saved}px`;
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(() => {
+      const height = Math.max(64, Math.min(420, Math.round(node.getBoundingClientRect().height)));
+      try { localStorage.setItem('claude-harness.composer-height', String(height)); } catch { /* ignore */ }
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [textareaRef]);
 
   const mentionHighlightActive = value.includes('@');
   const mention = useMemo(() => mentionAt(value, caret), [value, caret]);
@@ -549,7 +571,7 @@ export default function Composer({
             rows={rows}
             placeholder={placeholder}
             spellCheck={false}
-            className={`mention-textarea relative z-10 w-full resize-none bg-transparent px-2.5 py-2 text-[16px] leading-6 outline-none disabled:cursor-not-allowed disabled:opacity-60 ${mentionHighlightActive ? '' : 'mention-textarea-plain'}`}
+            className={`mention-textarea relative z-10 w-full resize-y bg-transparent px-2.5 py-2 text-[16px] leading-6 outline-none disabled:cursor-not-allowed disabled:opacity-60 ${mentionHighlightActive ? '' : 'mention-textarea-plain'}`}
           />
         </div>
 

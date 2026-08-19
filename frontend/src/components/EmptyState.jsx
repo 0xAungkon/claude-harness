@@ -111,7 +111,7 @@ export default function EmptyState({
             placeholder={selectedWorkspace?.path ? 'Ask anything — use @ for files or / for commands' : 'Choose a workspace first'}
             models={models} model={model} onModelChange={onModelChange} permissionMode={permissionMode} onPermissionModeChange={onPermissionModeChange}
             additionalDirs={additionalDirs} onAddDir={onAddDir} onLocalNotice={setNotice} approval={approval} onRespondApproval={onRespondApproval}
-            historyKey={`new:${selectedWorkspace?.path || 'none'}`}
+            historyKey={`new:${selectedWorkspace?.path || 'none'}`} draftKey={`new:${selectedWorkspace?.path || 'none'}`}
           />
 
           <div className="mt-3 flex items-center justify-center gap-2 text-[13px] text-harness-muted"><span>Enter to send</span><span>·</span><span>Shift+Enter for a new line</span><span>·</span><span>@ files</span><span>·</span><span>/ commands</span></div>
