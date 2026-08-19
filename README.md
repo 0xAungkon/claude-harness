@@ -80,9 +80,16 @@ claude-harness [--root <path>] [--host <host>] [--port <n>] [--no-open]
 | `--root <path>` | Scan root directory | `$HOME` |
 | `--host <host>` | Bind address | `127.0.0.1` |
 | `--port <n>` | HTTP/WebSocket port | `3030` |
-| `--no-open` | Don't auto-open browser | — |
+| `--open` | Auto-open browser on start | off |
 
 `CH_HOST` can also set the default bind host.
+
+### Environment variables
+
+| Variable | Description | Default |
+|---|---|---|
+| `CH_LOG_LEVEL` | Log verbosity: `debug`, `info`, `warn`, `error`, `silent` | `info` |
+| `CH_LOG_HTTP` | Log successful HTTP requests (`1` to enable) | off |
 
 ### Access from another device
 
@@ -151,7 +158,7 @@ Type `/` in the composer to see available commands:
 |---|---|
 | `/init` | Initialize a project |
 | `/compact` | Compact/normalize the transcript |
-| `/rewind` | Rewind to a checkpoint |
+| `/rewind` | Open checkpoint rewind workflow (restore code/conversation, summarize) |
 | `/btw <question>` | Ask a side question without interrupting the main task |
 | `/fork-session` | Fork the current session |
 | `/new` | Create a new session |
