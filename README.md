@@ -1,8 +1,10 @@
 # Claude Harness
 
+![Claude Harness](assets/screenshot.png)
+
 > **⚠️ Under active development** — APIs, features, and UI may change without notice. Not yet considered stable for production use.
 
-Claude Harness is a local/self-hosted React + Vite + Tailwind UI for browsing and continuing Claude Code sessions. The production build embeds the complete frontend into the Node entry point so `pkg` can create a single executable per platform.
+Let your cross-device workflow come together in a single Claude Code experience. Claude Harness extends the capabilities of Claude Code to the next level — a local/self-hosted React + Vite + Tailwind UI for browsing and continuing sessions from anywhere, with the production build embedded into a single executable per platform via `pkg`.
 
 See [CHANGELOG.md](CHANGELOG.md) for version history.
 
