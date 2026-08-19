@@ -1,0 +1,35 @@
+'use strict';
+const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { RuntimeStore } = require('../lib/runtime-state');
+
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-harness-runtime-'));
+const file = path.join(dir, 'runtime.json');
+const store = new RuntimeStore(file);
+const state = store.ensure({ key: 'abc', claudeSessionId: 'abc', workspacePath: '/tmp/project' });
+const first = store.addPrompt(state, 'first', { model: 'sonnet', permissionMode: 'acceptEdits' });
+const second = store.addPrompt(state, 'second', {});
+assert.equal(store.list()[0].queue.length, 2);
+store.updatePrompt(state, second.id, { paused: true, text: 'second edited' });
+assert.equal(state.queue[1].paused, true);
+assert.equal(state.queue[1].text, 'second edited');
+
+const side = store.addSideQuestion(state, 'what file were we editing?');
+assert.equal(side.status, 'queued');
+store.updateSideQuestion(state, side.id, { status: 'done', answer: 'src/index.js' });
+assert.equal(state.sideQuestions[0].answer, 'src/index.js');
+store.movePrompt(state, second.id, 0);
+assert.equal(state.queue[0].id, second.id);
+store.begin(state, first);
+assert.equal(state.status, 'running');
+assert.equal(state.active.text, 'first');
+const reloaded = new RuntimeStore(file);
+const restored = reloaded.get('abc');
+assert.equal(restored.status, 'idle');
+assert(restored.queue.some((item) => item.text === 'first' && item.paused === true));
+assert(restored.queue.some((item) => item.text === 'second edited'));
+assert.equal(restored.sideQuestions[0].answer, 'src/index.js');
+fs.rmSync(dir, { recursive: true, force: true });
+console.log('runtime state tests passed');

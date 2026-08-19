@@ -1,0 +1,46 @@
+{
+  "name": "claude-harness",
+  "version": "3.8.0",
+  "private": true,
+  "description": "Claude Code Harness with persistent background queues, live new-session handoff, global permission/completion sounds, reconnectable WebSocket state, optional authentication, stats, and single-binary production build.",
+  "bin": "index.js",
+  "scripts": {
+    "dev": "node scripts/dev.js",
+    "dev:no-open": "node scripts/dev.js --no-open",
+    "build:ui": "vite build --config frontend/vite.config.mjs",
+    "embed:ui": "node scripts/embed-ui.js",
+    "build": "npm run build:ui && npm run embed:ui",
+    "start": "node index.js",
+    "start:no-open": "node index.js --no-open",
+    "claude-harness": "npm start",
+    "binary": "npm run build && pkg . --compress GZip",
+    "test": "node tests/parser.test.js && node tests/runtime.test.js && node tests/stats.test.js"
+  },
+  "dependencies": {
+    "express": "4.21.2",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.3",
+    "autoprefixer": "^10.4.20",
+    "highlight.js": "^11.10.0",
+    "marked": "^12.0.2",
+    "pkg": "5.8.1",
+    "postcss": "^8.4.49",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tailwindcss": "^3.4.17",
+    "vite": "^6.4.0"
+  },
+  "pkg": {
+    "scripts": [],
+    "assets": [],
+    "targets": [
+      "node18-macos-x64",
+      "node18-linux-x64",
+      "node18-win-x64"
+    ],
+    "outputPath": "dist"
+  },
+  "license": "MIT"
+}

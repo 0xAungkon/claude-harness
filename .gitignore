@@ -1,0 +1,6 @@
+node_modules/
+frontend/dist/
+dist/
+generated/app-html.js
+.DS_Store
+npm-debug.log*
