@@ -313,7 +313,10 @@ function buildHarnessHookSettings({ cwd, port, token, permissionMode }) {
   const hooks = {
     PreToolUse: [
       {
-        matcher: 'AskUserQuestion|ExitPlanMode',
+        // AskUserQuestion is human input rather than a permission boundary, so
+        // keep it interactive even in bypass mode. ExitPlanMode is automatically
+        // allowed when bypassPermissions is active.
+        matcher: permissionMode === 'bypassPermissions' ? 'AskUserQuestion' : 'AskUserQuestion|ExitPlanMode',
         hooks: [{ ...common, url: `${base}/interactive` }]
       }
     ]
@@ -378,8 +381,13 @@ function runClaudeCode({
   return new Promise((resolve, reject) => {
     const claudeBin = process.env.CLAUDE_HARNESS_CLAUDE_BIN || 'claude';
     const normalizedPermission = permissionMode === 'manual' ? 'default' : permissionMode;
-    const args = ['-p', prompt, '--output-format', 'json', '--permission-mode', normalizedPermission || 'acceptEdits'];
-    const hookSettings = buildHarnessHookSettings({ cwd, port: harnessPort, token: hookToken, permissionMode });
+    const args = normalizedPermission === 'bypassPermissions'
+      ? ['--dangerously-skip-permissions', '-p', prompt, '--output-format', 'json']
+      : ['-p', prompt, '--output-format', 'json', '--permission-mode', normalizedPermission || 'acceptEdits'];
+    // Claude Code documents --dangerously-skip-permissions as the CLI
+    // equivalent of bypassPermissions. Keep it as the leading flag so newer
+    // Claude Code launch routing also recognizes the mode before print mode.
+    const hookSettings = buildHarnessHookSettings({ cwd, port: harnessPort, token: hookToken, permissionMode: normalizedPermission });
     if (hookSettings) args.push('--settings', JSON.stringify(hookSettings));
     if (model && model !== 'default') args.push('--model', model);
     if (tools !== null && tools !== undefined) args.push('--tools', String(tools));
@@ -525,6 +533,7 @@ async function main() {
   const sessionNamesPath = path.join(harnessStateDir, 'session-names.json');
   const permissionRulesPath = path.join(harnessStateDir, 'permission-rules.json');
   const statusMetricsPath = path.join(harnessStateDir, 'session-metrics.json');
+  const settingsPath = path.join(harnessStateDir, 'settings.json');
   let broadcast = () => {};
   let sessionNames = safeReadJson(sessionNamesPath) || {};
   let permissionRules = safeReadJson(permissionRulesPath);
@@ -532,6 +541,82 @@ async function main() {
   let statusMetrics = safeReadJson(statusMetricsPath) || {};
   if (!statusMetrics || typeof statusMetrics !== 'object' || Array.isArray(statusMetrics)) statusMetrics = {};
   let overallStatsCache = { at: 0, data: null };
+
+  function expandSettingsPath(value) {
+    const raw = String(value || '').trim();
+    if (raw === '~') return os.homedir();
+    if (raw.startsWith('~/') || raw.startsWith('~\\')) return path.join(os.homedir(), raw.slice(2));
+    return path.isAbsolute(raw) ? path.normalize(raw) : path.resolve(args.root, raw);
+  }
+
+  function normalizeHarnessSettings(input, { strict = false } = {}) {
+    const source = input && typeof input === 'object' ? input : {};
+    const rawLocations = Array.isArray(source.scanLocations) ? source.scanLocations : null;
+    const fallback = [{ id: 'default-root', type: 'path', value: args.root, depth: MAX_DEPTH, enabled: true }];
+    const locations = [];
+    for (const item of rawLocations == null ? fallback : rawLocations) {
+      if (!item || item.enabled === false) continue;
+      const type = item.type === 'regex' ? 'regex' : 'path';
+      const rawValue = String(item.value || item.pattern || '').trim();
+      if (!rawValue) {
+        if (strict) throw new Error('Every scan location needs a folder path or regular expression.');
+        continue;
+      }
+      const depthNumber = Number(item.depth);
+      if (strict && (!Number.isFinite(depthNumber) || depthNumber < 0 || depthNumber > 20)) throw new Error('Scan depth must be between 0 and 20.');
+      const depth = Math.max(0, Math.min(20, Number.isFinite(depthNumber) ? Math.floor(depthNumber) : MAX_DEPTH));
+      let value = rawValue;
+      if (type === 'regex') {
+        try { new RegExp(value); } catch (error) {
+          if (strict) throw new Error(`Invalid regular expression: ${value}`);
+          continue;
+        }
+      } else {
+        value = expandSettingsPath(value);
+      }
+      locations.push({
+        id: String(item.id || crypto.randomUUID()),
+        type,
+        value,
+        depth,
+        enabled: true
+      });
+    }
+    if (!locations.length) {
+      if (strict) throw new Error('Add at least one scan location.');
+      return { scanLocations: fallback };
+    }
+    return { scanLocations: locations };
+  }
+
+  let harnessSettings = normalizeHarnessSettings(safeReadJson(settingsPath));
+
+  function saveHarnessSettings() {
+    try { writeJsonAtomic(settingsPath, harnessSettings); }
+    catch (error) { console.warn(`Claude Harness: unable to persist settings: ${error.message}`); }
+  }
+
+  function publicHarnessSettings() {
+    return { scanLocations: harnessSettings.scanLocations.map((item) => ({ ...item })) };
+  }
+
+  function workspaceAllowedBySettings(workspacePath) {
+    const resolved = path.resolve(String(workspacePath || ''));
+    const normalized = resolved.split(path.sep).join('/');
+    for (const location of harnessSettings.scanLocations || []) {
+      if (location.type === 'regex') {
+        try { if (new RegExp(location.value).test(normalized)) return true; } catch { /* validated on save */ }
+        continue;
+      }
+      const base = path.resolve(location.value);
+      const relative = path.relative(base, resolved);
+      if (relative === '') return true;
+      if (relative.startsWith('..') || path.isAbsolute(relative)) continue;
+      const depth = relative.split(path.sep).filter(Boolean).length;
+      if (depth <= Number(location.depth || 0)) return true;
+    }
+    return false;
+  }
 
   function saveSessionNames() {
     try {
@@ -749,6 +834,7 @@ async function main() {
     for (const state of runtimeStore.sessions.values()) {
       if (scanner.findByClaudeSessionId(state.claudeSessionId)) continue;
       if (!state.workspacePath) continue;
+      if (!workspaceAllowedBySettings(state.workspacePath)) continue;
       if (!state.active && !(state.queue || []).length && !(state.sideQuestions || []).length) continue;
       let workspace = (state.workspaceId && byId.get(state.workspaceId)) || byPath.get(path.resolve(state.workspacePath));
       if (!workspace) {
@@ -933,11 +1019,11 @@ async function main() {
   }
 
   async function rescan() {
-    workspaceCache = await scanner.findClaudeWorkspaces(args.root);
+    workspaceCache = await scanner.findClaudeWorkspaces({ root: args.root, locations: harnessSettings.scanLocations });
     applySessionNames();
     fileIndexCache.clear();
     overallStatsCache = { at: 0, data: null };
-    scanMeta = { root: args.root, scannedAt: new Date().toISOString() };
+    scanMeta = { root: args.root, scannedAt: new Date().toISOString(), scanLocations: publicHarnessSettings().scanLocations };
 
     for (const state of runtimeStore.sessions.values()) {
       const record = scanner.findByClaudeSessionId(state.claudeSessionId);
@@ -1567,6 +1653,25 @@ async function main() {
 
   app.get('/api/workspaces', (_req, res) => res.json(publicWorkspaces()));
   app.get('/api/meta', (_req, res) => res.json(scanMeta));
+  app.get('/api/settings', (_req, res) => res.json({ settings: publicHarnessSettings() }));
+  app.put('/api/settings', async (req, res) => {
+    try {
+      harnessSettings = normalizeHarnessSettings(req.body || {}, { strict: true });
+      saveHarnessSettings();
+      await rescan();
+      return res.json({ ok: true, settings: publicHarnessSettings(), meta: scanMeta, workspaces: publicWorkspaces() });
+    } catch (error) {
+      return res.status(400).json({ error: error.message || 'Unable to save settings.' });
+    }
+  });
+  app.post('/api/settings/rescan', async (_req, res) => {
+    try {
+      await rescan();
+      return res.json({ ok: true, settings: publicHarnessSettings(), meta: scanMeta, workspaces: publicWorkspaces() });
+    } catch (error) {
+      return res.status(500).json({ error: error.message || 'Rescan failed.' });
+    }
+  });
   app.get('/api/models', (req, res) => {
     let workspacePath = null;
     if (typeof req.query?.workspacePath === 'string' && req.query.workspacePath.trim()) {
@@ -1585,18 +1690,47 @@ async function main() {
 
   app.get('/api/files', (req, res) => {
     try {
-      const workspacePath = expandUserPath(req.query?.workspacePath || '');
       if (!req.query?.workspacePath) return res.status(400).json({ error: 'workspacePath is required.' });
-      const index = getProjectFileIndex(workspacePath);
-      const files = searchProjectFiles(index, req.query?.q || '');
+      const workspacePath = expandUserPath(req.query.workspacePath || '');
+      const rawQuery = String(req.query?.q || '').slice(0, 4096);
+      const unescapedQuery = rawQuery.replace(/\\ /g, ' ');
+      const pathLikeExternal = unescapedQuery === '~'
+        || unescapedQuery.startsWith('~/')
+        || unescapedQuery.startsWith('~\\')
+        || path.isAbsolute(unescapedQuery)
+        || unescapedQuery.startsWith('../')
+        || unescapedQuery.startsWith('..\\');
+
+      let indexRoot = workspacePath;
+      let searchQuery = rawQuery;
+      if (pathLikeExternal) {
+        const hadTrailingSeparator = /[\\/]$/.test(unescapedQuery);
+        let expandedQuery;
+        if (unescapedQuery === '~') expandedQuery = os.homedir();
+        else if (unescapedQuery.startsWith('~/') || unescapedQuery.startsWith('~\\')) expandedQuery = path.join(os.homedir(), unescapedQuery.slice(2));
+        else if (path.isAbsolute(unescapedQuery)) expandedQuery = path.normalize(unescapedQuery);
+        else expandedQuery = path.resolve(workspacePath, unescapedQuery);
+        if (hadTrailingSeparator && !expandedQuery.endsWith(path.sep)) expandedQuery += path.sep;
+
+        const candidateDirectory = hadTrailingSeparator ? expandedQuery : path.dirname(expandedQuery);
+        indexRoot = path.resolve(candidateDirectory);
+        if (!readableDirectory(indexRoot)) {
+          return res.json({ workspacePath, browseRoot: indexRoot, files: [], totalIndexed: 0, truncated: false });
+        }
+        searchQuery = expandedQuery;
+      }
+
+      const index = getProjectFileIndex(indexRoot);
+      const files = searchProjectFiles(index, searchQuery);
       return res.json({
         workspacePath,
+        browseRoot: indexRoot,
         files,
         totalIndexed: (index.entries || index.files || []).length,
         truncated: Boolean(index.truncated)
       });
     } catch (error) {
-      return res.status(400).json({ error: error.message || 'Unable to list workspace files.' });
+      return res.status(400).json({ error: error.message || 'Unable to list files.' });
     }
   });
 

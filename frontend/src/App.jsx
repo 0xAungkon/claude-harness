@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Sidebar from './components/Sidebar';
 import EmptyState from './components/EmptyState';
 import SessionView from './components/SessionView';
-import SettingsModal from './components/SettingsModal';
+import SettingsPage from './components/SettingsPage';
 import LoginScreen from './components/LoginScreen';
 import useHarnessSocket from './useHarnessSocket';
 
@@ -322,6 +322,7 @@ export default function App() {
         setSelected(await fetchSession(sessionMeta.id));
       }
       setSelectedWorkspace(workspace);
+      setSettingsOpen(false);
       setMobileSidebarOpen(false);
       if (updateHistory) navigatePath(`/app/session/${encodeURIComponent(sessionMeta.id)}`);
     } catch (err) { setError(err.message); }
@@ -336,11 +337,17 @@ export default function App() {
       const pathname = window.location.pathname;
       const match = pathname.match(/^\/app\/session\/([^/]+)\/?$/);
       if (!match) {
+        if (pathname === '/app/settings' || pathname === '/app/settings/') {
+          if (!cancelled) setSettingsOpen(true);
+          return;
+        }
+        if (!cancelled) setSettingsOpen(false);
         if (pathname === '/app' || pathname === '/app/') {
           if (!cancelled) { setSelected(null); setSelectedWorkspace(null); }
         }
         return;
       }
+      if (!cancelled) setSettingsOpen(false);
 
       let requestedId;
       try { requestedId = decodeURIComponent(match[1]); } catch { requestedId = match[1]; }
@@ -543,8 +550,20 @@ export default function App() {
   };
 
   const newSession = (workspace = null) => {
-    setSelected(null); setError(''); if (workspace) setSelectedWorkspace(workspace); setMobileSidebarOpen(false); setNewSessionKey((value) => value + 1);
+    setSettingsOpen(false); setSelected(null); setError(''); if (workspace) setSelectedWorkspace(workspace); setMobileSidebarOpen(false); setNewSessionKey((value) => value + 1);
     navigatePath('/app');
+  };
+
+  const openSettings = () => {
+    setSettingsOpen(true);
+    setMobileSidebarOpen(false);
+    navigatePath('/app/settings');
+  };
+
+  const closeSettings = () => {
+    setSettingsOpen(false);
+    if (selected?.id) navigatePath(`/app/session/${encodeURIComponent(selected.id)}`);
+    else navigatePath('/app');
   };
 
   useEffect(() => {
@@ -574,7 +593,7 @@ export default function App() {
     <div className="theme-root flex h-screen overflow-hidden bg-harness-body text-harness-primary" data-theme={theme}>
       <Sidebar
         workspaces={workspaces} selectedId={selected?.id} onSelect={selectSession} onRefresh={refresh} refreshing={refreshing}
-        onOpenSettings={() => setSettingsOpen(true)} onNewSession={newSession} onRenameSession={renameSession} onForkSession={forkSession}
+        onOpenSettings={openSettings} onNewSession={newSession} onRenameSession={renameSession} onForkSession={forkSession}
         collapsed={sidebarCollapsed} rootPath={meta?.root} onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
         mobileOpen={mobileSidebarOpen} onMobileClose={() => setMobileSidebarOpen(false)} focusRequestKey={sidebarFocusRequest}
         attentionSessionIds={attentionSessionIds} attentionClaudeSessionIds={attentionClaudeSessionIds}
@@ -584,7 +603,13 @@ export default function App() {
         {error && <div className="app-error absolute left-1/2 top-4 z-[70] max-w-[calc(100vw-24px)] -translate-x-1/2 rounded-xl border px-4 py-2.5 text-sm leading-5 shadow-lg sm:max-w-[760px]">{error}</div>}
         {loadingSession && <div className="loading-overlay absolute inset-0 z-30 flex items-center justify-center backdrop-blur-[1px]"><div className="loading-pill rounded-full border px-4 py-2 text-sm shadow-sm">Loading session…</div></div>}
 
-        {selected ? (
+        {settingsOpen ? (
+          <SettingsPage
+            meta={{ ...meta, authEnabled: auth.enabled, user: auth.user }} apiFetch={apiFetch} onReloadWorkspaces={loadWorkspaces}
+            onClose={closeSettings} onLogout={auth.enabled ? logout : null} socketConnected={socket.connected}
+            theme={theme} onToggleTheme={toggleTheme} onOpenSidebar={() => setMobileSidebarOpen(true)}
+          />
+        ) : selected ? (
           <SessionView
             key={selected.claudeSessionId || selected.id} session={selected} workspace={selectedWorkspace} onSend={continueSession}
             runtimeState={activeRuntime} onQueueDelete={(id) => mutateQueue('delete', id)}
@@ -604,7 +629,6 @@ export default function App() {
         )}
       </main>
 
-      {settingsOpen && <SettingsModal meta={{ ...meta, websocket: socket.connected ? 'Connected' : 'Reconnecting', authEnabled: auth.enabled, user: auth.user }} onClose={() => setSettingsOpen(false)} onLogout={auth.enabled ? logout : null} />}
     </div>
   );
 }

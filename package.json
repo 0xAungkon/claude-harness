@@ -1,8 +1,8 @@
 {
   "name": "claude-harness",
-  "version": "3.8.0",
+  "version": "3.9.0",
   "private": true,
-  "description": "Claude Code Harness with persistent background queues, live new-session handoff, global permission/completion sounds, reconnectable WebSocket state, optional authentication, stats, and single-binary production build.",
+  "description": "Claude Code Harness with configurable folder/regex workspace discovery, full-page settings, external @path browsing, persistent background queues, reconnectable WebSocket state, optional authentication, and single-binary production build.",
   "bin": "index.js",
   "scripts": {
     "dev": "node scripts/dev.js",

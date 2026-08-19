@@ -92,6 +92,10 @@ button { user-select: none; }
   .toolbar-pill:hover { border-color: var(--border); background: var(--bg-hover); color: var(--text-primary); }
 }
 
+/* Settings page */
+.settings-input { transition: border-color .15s ease, box-shadow .15s ease, background .15s ease; }
+.settings-input:focus { border-color: color-mix(in srgb, var(--accent) 48%, var(--border)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent); }
+
 /* App surfaces */
 .composer-card {
   background: var(--bg-panel);

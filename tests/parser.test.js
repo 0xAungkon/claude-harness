@@ -136,6 +136,25 @@ async function run() {
     const rescanned = await scanner.findClaudeWorkspaces(tempRoot);
     assert(!rescanned.some((workspace) => path.resolve(workspace.path) === path.resolve(deletedProject)), 'deleted project workspace must not be shown');
     assert(!rescanned.some((workspace) => (workspace.sessions || []).some((session) => session.claudeSessionId === 'orphan-session')), 'orphaned session must not be shown');
+
+
+    // Settings regression: explicit scan locations must filter the central
+    // Claude transcript store even though all JSONL files live under the same
+    // parent .claude/projects directory.
+    const pathFiltered = await scanner.findClaudeWorkspaces({
+      root: tempRoot,
+      locations: [{ type: 'path', value: nested, depth: 0 }]
+    });
+    assert(pathFiltered.some((workspace) => path.resolve(workspace.path) === path.resolve(nested)), 'explicit path scan should include the selected workspace');
+    assert(!pathFiltered.some((workspace) => path.resolve(workspace.path) === path.resolve(fallbackNested)), 'explicit path scan should exclude other workspaces');
+
+    const escapedFallback = fallbackNested.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regexFiltered = await scanner.findClaudeWorkspaces({
+      root: tempRoot,
+      locations: [{ type: 'regex', value: `^${escapedFallback}$`, depth: 2 }]
+    });
+    assert(regexFiltered.some((workspace) => path.resolve(workspace.path) === path.resolve(fallbackNested)), 'regex scan should include matching workspace paths');
+    assert(!regexFiltered.some((workspace) => path.resolve(workspace.path) === path.resolve(nested)), 'regex scan should exclude non-matching workspace paths');
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
