@@ -56,11 +56,7 @@ npm install
 npm run dev
 ```
 
-This runs the Vite development server with HMR at `http://localhost:3030`. To skip auto-opening the browser:
-
-```bash
-npm run dev:no-open
-```
+This runs the Vite development server with HMR at `http://localhost:3030`. Browser auto-open is disabled by default; use `npm run dev:open` or `npm run dev -- --open` to open it explicitly.
 
 ### Production
 
@@ -71,7 +67,7 @@ npm run build
 npm start
 ```
 
-`npm start` does not rebuild — it serves the already-built production UI.
+`npm start` does not rebuild — it serves the already-built production UI. Use `npm run start:open` or `npm start -- --open` to open the browser automatically.
 
 ### CLI options
 

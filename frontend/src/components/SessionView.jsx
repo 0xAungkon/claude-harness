@@ -3,6 +3,7 @@ import Markdown from './Markdown';
 import Composer from './Composer';
 import StatsView from './StatsView';
 import ExtensionsManager from './ExtensionsManager';
+import RewindPanel from './RewindPanel';
 import { AgentWriting, QueuePanel } from './PromptQueue';
 import {
   CopyIcon, ToolIcon, FolderIcon, MenuIcon, SunIcon, MoonIcon, ForkIcon, PanelRightIcon
@@ -416,6 +417,7 @@ export default function SessionView({
   approval = null, onRespondApproval = async () => {}, socketConnected = false, socketReconnecting = false,
   theme = 'light', onToggleTheme = () => {}, onOpenSidebar = () => {}, onNewSession = () => {},
   onRenameSession = async () => {}, onStop = async () => {}, onBtw = async () => {}, onForkMessage = async () => {},
+  onLoadRewind = async () => ({ points: [] }), onApplyRewind = async () => {},
   notesOpen = false, onToggleNotes = () => {}
 }) {
   const [now, setNow] = useState(Date.now());
@@ -432,6 +434,10 @@ export default function SessionView({
   const cancelTitleRef = useRef(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState(session.name || '');
+  const [rewindOpen, setRewindOpen] = useState(false);
+  const [rewindPoints, setRewindPoints] = useState([]);
+  const [rewindLoading, setRewindLoading] = useState(false);
+  const [rewindError, setRewindError] = useState('');
 
   const projectPath = session.projectPath || workspace?.path || runtimeState?.workspacePath || '';
   const projectName = session.projectName || workspace?.name || (projectPath ? projectPath.split(/[\\/]/).filter(Boolean).at(-1) : '') || 'Workspace';
@@ -523,9 +529,41 @@ export default function SessionView({
     setNotice('Conversation exported as Markdown');
   };
 
+  const openRewind = async () => {
+    setExtensions(null);
+    setTab('chat');
+    setRewindOpen(true);
+    setRewindLoading(true);
+    setRewindError('');
+    scrollToEnd('smooth');
+    try {
+      const body = await onLoadRewind();
+      setRewindPoints(Array.isArray(body?.points) ? body.points : []);
+    } catch (error) {
+      setRewindPoints([]);
+      setRewindError(error?.message || 'Unable to load rewind checkpoints.');
+    } finally {
+      setRewindLoading(false);
+    }
+  };
+
+  const applyRewind = async (point, action) => {
+    const result = await onApplyRewind(point, action);
+    if (result?.mode === 'same') {
+      setRewindOpen(false);
+      setNotice(action === 'restore_code' ? 'Tracked code restored' : 'Rewind applied');
+    }
+    return result;
+  };
+
   const submit = async (explicitPrompt = null) => {
     const value = String(explicitPrompt || '').trim();
     if (!value || !projectPath) return;
+
+    if (value === '/rewind') {
+      await openRewind();
+      return;
+    }
 
     if (value === '/skills' || value === '/plugins' || value === '/mcp') {
       setExtensions(value.slice(1));
@@ -559,6 +597,7 @@ export default function SessionView({
     }
 
     setExtensions(null);
+    setRewindOpen(false);
     setTab('chat');
     scrollToEnd('smooth');
     const outgoing = value === '/plugin-reload' ? '/reload-plugins' : value;
@@ -662,7 +701,7 @@ export default function SessionView({
       {extensions ? (
         <ExtensionsManager initialTab={extensions} workspacePath={projectPath} onClose={() => setExtensions(null)} onNotice={setNotice} />
       ) : tab === 'chat' ? (
-        <div ref={scrollRef} className={`harness-scroll min-h-0 flex-1 overflow-y-auto px-3 pt-5 sm:px-6 sm:pt-7 lg:px-8 ${approval ? 'pb-[520px] sm:pb-[490px]' : queue.length ? 'pb-[360px] sm:pb-[370px]' : 'pb-[156px] sm:pb-44'}`}>
+        <div ref={scrollRef} className={`harness-scroll min-h-0 flex-1 overflow-y-auto px-3 pt-5 sm:px-6 sm:pt-7 lg:px-8 ${approval ? 'pb-[520px] sm:pb-[490px]' : rewindOpen ? 'pb-[590px] sm:pb-[560px]' : queue.length ? 'pb-[360px] sm:pb-[370px]' : 'pb-[156px] sm:pb-44'}`}>
           <div className="mx-auto flex w-full max-w-[920px] flex-col gap-6 sm:gap-8">
             {items.map((item, index) => {
               if (item.type === 'user') return <UserTurn key={`user-${item.turn.timestamp || index}-${index}`} turn={item.turn} now={now} />;
@@ -688,6 +727,15 @@ export default function SessionView({
       )}
 
       <div className="composer-dock pointer-events-none absolute bottom-0 left-0 right-0 px-2 pb-[max(.6rem,env(safe-area-inset-bottom))] pt-12 sm:px-5 sm:pb-5 sm:pt-16">
+        {rewindOpen && (
+          <RewindPanel
+            points={rewindPoints}
+            loading={rewindLoading}
+            error={rewindError}
+            onClose={() => { setRewindOpen(false); setRewindError(''); requestAnimationFrame(() => textareaRef.current?.focus()); }}
+            onApply={applyRewind}
+          />
+        )}
         <QueuePanel
           queue={queue}
           onDelete={(id) => safeQueueAction(() => onQueueDelete(id))}

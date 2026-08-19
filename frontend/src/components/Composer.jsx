@@ -179,24 +179,81 @@ export default function Composer({
   const [suppressed, setSuppressed] = useState(false);
   const [modeOpen, setModeOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
-
-  useEffect(() => {
-    const node = textareaRef.current;
-    if (!node) return undefined;
+  const [composerHeight, setComposerHeight] = useState(() => {
     let saved = 112;
     try {
       const parsed = Number(localStorage.getItem('claude-harness.composer-height'));
-      if (Number.isFinite(parsed)) saved = Math.max(64, Math.min(420, parsed));
+      if (Number.isFinite(parsed)) saved = parsed;
     } catch { /* default height */ }
-    node.style.height = `${saved}px`;
-    if (typeof ResizeObserver === 'undefined') return undefined;
-    const observer = new ResizeObserver(() => {
-      const height = Math.max(64, Math.min(420, Math.round(node.getBoundingClientRect().height)));
-      try { localStorage.setItem('claude-harness.composer-height', String(height)); } catch { /* ignore */ }
-    });
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [textareaRef]);
+    return Math.max(64, Math.min(420, Math.round(saved)));
+  });
+  const composerHeightRef = useRef(composerHeight);
+
+  const composerHeightBounds = () => {
+    if (typeof window === 'undefined') return { min: 64, max: 420 };
+    const mobile = window.innerWidth <= 767;
+    const viewportMax = Math.floor(window.innerHeight * (mobile ? 0.38 : 0.44));
+    return { min: 64, max: Math.max(96, Math.min(mobile ? 320 : 420, viewportMax)) };
+  };
+
+  const applyComposerHeight = (nextHeight, persist = true) => {
+    const { min, max } = composerHeightBounds();
+    const next = Math.max(min, Math.min(max, Math.round(nextHeight)));
+    composerHeightRef.current = next;
+    setComposerHeight(next);
+    if (persist) {
+      try { localStorage.setItem('claude-harness.composer-height', String(next)); } catch { /* ignore */ }
+    }
+  };
+
+  const beginComposerResize = (event) => {
+    if (event.button !== undefined && event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const startY = event.clientY;
+    const startHeight = composerHeightRef.current;
+    const pointerId = event.pointerId;
+    document.body.classList.add('composer-resizing');
+
+    const onMove = (moveEvent) => {
+      if (pointerId !== undefined && moveEvent.pointerId !== undefined && moveEvent.pointerId !== pointerId) return;
+      // The resize edge sits above the field: dragging upward makes the composer taller.
+      applyComposerHeight(startHeight + (startY - moveEvent.clientY), false);
+    };
+    const onEnd = (endEvent) => {
+      if (pointerId !== undefined && endEvent.pointerId !== undefined && endEvent.pointerId !== pointerId) return;
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onEnd);
+      window.removeEventListener('pointercancel', onEnd);
+      document.body.classList.remove('composer-resizing');
+      try { localStorage.setItem('claude-harness.composer-height', String(composerHeightRef.current)); } catch { /* ignore */ }
+    };
+
+    window.addEventListener('pointermove', onMove, { passive: false });
+    window.addEventListener('pointerup', onEnd);
+    window.addEventListener('pointercancel', onEnd);
+  };
+
+  const handleComposerResizeKey = (event) => {
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown' && event.key !== 'Home' && event.key !== 'End') return;
+    event.preventDefault();
+    const { min, max } = composerHeightBounds();
+    if (event.key === 'ArrowUp') applyComposerHeight(composerHeightRef.current + 16);
+    if (event.key === 'ArrowDown') applyComposerHeight(composerHeightRef.current - 16);
+    if (event.key === 'Home') applyComposerHeight(min);
+    if (event.key === 'End') applyComposerHeight(max);
+  };
+
+  useEffect(() => {
+    composerHeightRef.current = composerHeight;
+  }, [composerHeight]);
+
+  useEffect(() => {
+    const clampToViewport = () => applyComposerHeight(composerHeightRef.current);
+    window.addEventListener('resize', clampToViewport);
+    clampToViewport();
+    return () => window.removeEventListener('resize', clampToViewport);
+  }, []);
 
   const mentionHighlightActive = value.includes('@');
   const mention = useMemo(() => mentionAt(value, caret), [value, caret]);
@@ -550,8 +607,24 @@ export default function Composer({
 
       {approval && <InlineApproval approval={approval} onRespond={onRespondApproval} />}
 
-      <div className={`composer-card rounded-[20px] border p-2.5 shadow-composer transition ${approval ? 'mt-2' : ''}`}>
-        <div className="mention-editor relative min-h-[64px] overflow-hidden rounded-xl">
+      <div className={`composer-card relative rounded-[20px] border p-2.5 shadow-composer transition ${approval ? 'mt-2' : ''}`}>
+        <div
+          className="composer-resize-edge"
+          role="separator"
+          aria-label="Resize prompt box"
+          aria-orientation="horizontal"
+          aria-valuemin={64}
+          aria-valuemax={composerHeightBounds().max}
+          aria-valuenow={Math.round(composerHeight)}
+          tabIndex={0}
+          onPointerDown={beginComposerResize}
+          onKeyDown={handleComposerResizeKey}
+          title="Drag to resize prompt box"
+        />
+        <div className="composer-resize-corner composer-resize-corner-left" onPointerDown={beginComposerResize} aria-hidden="true" />
+        <div className="composer-resize-corner composer-resize-corner-right" onPointerDown={beginComposerResize} aria-hidden="true" />
+
+        <div className="mention-editor relative min-h-[64px] overflow-hidden rounded-xl" style={{ height: `${composerHeight}px` }}>
           {value && mentionHighlightActive && (
             <div ref={backdropRef} aria-hidden="true" className="mention-backdrop pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words px-2.5 py-2 text-[16px] leading-6">
               {pieces.map((piece, index) => piece.mention ? <span key={index} className="mention-token">{piece.text}</span> : <span key={index}>{piece.text}</span>)}
@@ -571,7 +644,7 @@ export default function Composer({
             rows={rows}
             placeholder={placeholder}
             spellCheck={false}
-            className={`mention-textarea relative z-10 w-full resize-y bg-transparent px-2.5 py-2 text-[16px] leading-6 outline-none disabled:cursor-not-allowed disabled:opacity-60 ${mentionHighlightActive ? '' : 'mention-textarea-plain'}`}
+            className={`mention-textarea relative z-10 h-full w-full resize-none bg-transparent px-2.5 py-2 text-[16px] leading-6 outline-none disabled:cursor-not-allowed disabled:opacity-60 ${mentionHighlightActive ? '' : 'mention-textarea-plain'}`}
           />
         </div>
 

@@ -14,6 +14,9 @@ const { RuntimeStore } = require('./lib/runtime-state');
 const { UiStateStore } = require('./lib/ui-state');
 const { aggregateStats, analyzeTranscriptFile, listSkills } = require('./lib/stats');
 const { WebSocketServer, WebSocket } = require('ws');
+const { createLogger } = require('./lib/logger');
+
+const log = createLogger('server');
 
 const MAX_CLAUDE_OUTPUT_BYTES = 12 * 1024 * 1024;
 const VALID_PERMISSION_MODES = new Set(['manual', 'default', 'acceptEdits', 'plan', 'auto', 'dontAsk', 'bypassPermissions']);
@@ -74,12 +77,12 @@ function maybeRunStatusLineHelper(argv = process.argv.slice(2)) {
   return true;
 }
 
-function runClaudeCli(args, cwd, { timeout = 20000 } = {}) {
+function runClaudeCli(args, cwd, { timeout = 20000, env: extraEnv = null } = {}) {
   return new Promise((resolve, reject) => {
     const claudeBin = process.env.CLAUDE_HARNESS_CLAUDE_BIN || 'claude';
     let child;
     try {
-      const childEnv = { ...process.env };
+      const childEnv = { ...process.env, ...(extraEnv && typeof extraEnv === 'object' ? extraEnv : {}) };
       delete childEnv.CH_USER;
       delete childEnv.CH_PASSWORD;
       child = spawn(claudeBin, args, { cwd: cwd || os.homedir(), env: childEnv, shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -182,11 +185,12 @@ function loadProductionHtml() {
 }
 
 function parseArgs(argv) {
-  const out = { root: os.homedir(), host: process.env.CH_HOST || '127.0.0.1', port: 3030, open: true, help: false };
+  const out = { root: os.homedir(), host: process.env.CH_HOST || '127.0.0.1', port: 3030, open: false, help: false };
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--help' || arg === '-h') out.help = true;
+    else if (arg === '--open') out.open = true;
     else if (arg === '--no-open') out.open = false;
     else if (arg === '--root' && argv[i + 1]) out.root = argv[++i];
     else if (arg.startsWith('--root=')) out.root = arg.slice(7);
@@ -207,7 +211,7 @@ function parseArgs(argv) {
 }
 
 function printHelp() {
-  console.log(`Claude Harness — local Claude Code session UI\n\nUsage:\n  claude-harness [--root <path>] [--host <host>] [--port <n>] [--no-open]\n\nOptions:\n  --root <path>   Scan root (default: $HOME)\n  --host <host>   Bind host (default: 127.0.0.1; use 0.0.0.0 for LAN access)\n  --port <n>      HTTP port (default: 3030)\n  --no-open       Do not open the browser automatically\n  -h, --help      Show this help\n\nLive prompts invoke the locally installed \"claude\" executable.`);
+  process.stdout.write(`Claude Harness — local Claude Code session UI\n\nUsage:\n  claude-harness [--root <path>] [--host <host>] [--port <n>] [--open]\n\nOptions:\n  --root <path>   Scan root (default: $HOME)\n  --host <host>   Bind host (default: 127.0.0.1; use 0.0.0.0 for LAN access)\n  --port <n>      HTTP port (default: 3030)\n  --open          Open the default browser after startup (off by default)\n  --no-open       Explicitly keep browser auto-open disabled\n  -h, --help      Show this help\n\nLogging:\n  CH_LOG_LEVEL=debug|info|warn|error|silent (default: info)\n  CH_LOG_HTTP=1 logs successful HTTP requests as well.\n\nLive prompts invoke the locally installed "claude" executable.\n`);
 }
 
 function openBrowser(url) {
@@ -216,7 +220,7 @@ function openBrowser(url) {
     : process.platform === 'darwin'
       ? `open "${url}"`
       : `xdg-open "${url}"`;
-  exec(command, () => {});
+  exec(command, (error) => { if (error) log.warn('Unable to open browser', { error, url }); });
 }
 
 
@@ -404,7 +408,7 @@ function runClaudeCode({
 
     let child;
     try {
-      const childEnv = { ...process.env };
+      const childEnv = { ...process.env, CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING: 'true' };
       // Harness login credentials are for the web portal only and must never
       // be exposed to Claude Code or tools that Claude launches.
       delete childEnv.CH_USER;
@@ -490,7 +494,7 @@ async function main() {
   try {
     args = parseArgs(process.argv.slice(2));
   } catch (error) {
-    console.error(`Error: ${error.message}`);
+    log.error('Invalid command-line arguments', { error });
     process.exitCode = 2;
     return;
   }
@@ -504,7 +508,7 @@ async function main() {
     const stat = fs.statSync(args.root);
     if (!stat.isDirectory()) throw new Error('not a directory');
   } catch {
-    console.error(`Error: scan root is not readable: ${args.root}`);
+    log.error('Scan root is not readable', { root: args.root });
     process.exitCode = 2;
     return;
   }
@@ -512,7 +516,7 @@ async function main() {
   let auth;
   try { auth = createAuthConfig(); }
   catch (error) {
-    console.error(`Error: ${error.message}`);
+    log.error('Authentication configuration is invalid', { error });
     process.exitCode = 2;
     return;
   }
@@ -595,7 +599,7 @@ async function main() {
 
   function saveHarnessSettings() {
     try { writeJsonAtomic(settingsPath, harnessSettings); }
-    catch (error) { console.warn(`Claude Harness: unable to persist settings: ${error.message}`); }
+    catch (error) { log.warn('Unable to persist settings', { error, file: settingsPath }); }
   }
 
   function publicHarnessSettings() {
@@ -625,7 +629,7 @@ async function main() {
       fs.mkdirSync(harnessStateDir, { recursive: true });
       fs.writeFileSync(sessionNamesPath, `${JSON.stringify(sessionNames, null, 2)}\n`, 'utf8');
     } catch (error) {
-      console.warn(`Claude Harness: unable to persist session names: ${error.message}`);
+      log.warn('Unable to persist session names', { error, file: sessionNamesPath });
     }
   }
 
@@ -635,7 +639,7 @@ async function main() {
       fs.mkdirSync(harnessStateDir, { recursive: true });
       fs.writeFileSync(permissionRulesPath, `${JSON.stringify(permissionRules, null, 2)}\n`, 'utf8');
     } catch (error) {
-      console.warn(`Claude Harness: unable to persist permission rules: ${error.message}`);
+      log.warn('Unable to persist permission rules', { error, file: permissionRulesPath });
     }
   }
 
@@ -647,7 +651,7 @@ async function main() {
       statusMetrics = Object.fromEntries(entries);
       writeJsonAtomic(statusMetricsPath, statusMetrics);
     } catch (error) {
-      console.warn(`Claude Harness: unable to persist session metrics: ${error.message}`);
+      log.warn('Unable to persist session metrics', { error, file: statusMetricsPath });
     }
   }
 
@@ -1209,6 +1213,265 @@ async function main() {
     return { newSessionId, destination };
   }
 
+  function transcriptContentText(value) {
+    if (value == null) return '';
+    if (typeof value === 'string') return value;
+    if (Array.isArray(value)) {
+      return value.map((item) => {
+        if (typeof item === 'string') return item;
+        if (!item || typeof item !== 'object') return '';
+        if (item.type === 'tool_result') return '';
+        if (typeof item.text === 'string') return item.text;
+        if (typeof item.content === 'string') return item.content;
+        return '';
+      }).filter(Boolean).join('\n');
+    }
+    if (typeof value === 'object') {
+      if (typeof value.text === 'string') return value.text;
+      if (typeof value.content === 'string') return value.content;
+    }
+    return '';
+  }
+
+  function transcriptTimestamp(obj) {
+    const wrapped = obj?.message && typeof obj.message === 'object' ? obj.message : obj;
+    const raw = obj?.timestamp ?? obj?.created_at ?? wrapped?.timestamp ?? wrapped?.created_at ?? null;
+    if (raw == null || raw === '') return null;
+    const date = typeof raw === 'number' ? new Date(raw < 1e12 ? raw * 1000 : raw) : new Date(raw);
+    return Number.isNaN(date.getTime()) ? null : date.toISOString();
+  }
+
+  function transcriptUserPrompt(obj) {
+    if (!obj || typeof obj !== 'object') return null;
+    const wrapped = obj.message && typeof obj.message === 'object' ? obj.message : obj;
+    if ((wrapped.role || obj.role) !== 'user') return null;
+    const content = wrapped.content ?? obj.content ?? '';
+    if (Array.isArray(content)) {
+      const meaningfulBlocks = content.filter((block) => {
+        if (typeof block === 'string') return Boolean(block.trim());
+        if (!block || typeof block !== 'object') return false;
+        return block.type !== 'tool_result';
+      });
+      if (!meaningfulBlocks.length) return null;
+    }
+    let text = transcriptContentText(content).trim();
+    if (!text) return null;
+    const command = text.match(/<command-name>([\s\S]*?)<\/command-name>/i)?.[1]?.trim();
+    const commandArgs = text.match(/<command-args>([\s\S]*?)<\/command-args>/i)?.[1]?.trim();
+    if (command) text = `${command}${commandArgs ? ` ${commandArgs}` : ''}`.trim();
+    if (/^<local-command-caveat>/i.test(text) && !command) return null;
+    const checkpointId = [obj.uuid, wrapped.uuid, obj.message_id, wrapped.message_id]
+      .find((value) => typeof value === 'string' && value.trim()) || null;
+    return { text, checkpointId, timestamp: transcriptTimestamp(obj) };
+  }
+
+  function lineCount(value) {
+    const text = String(value ?? '');
+    if (!text) return 0;
+    return text.split(/\r?\n/).length;
+  }
+
+  function toolEditDelta(block, projectPath) {
+    if (!block || block.type !== 'tool_use') return null;
+    const name = String(block.name || '');
+    if (!['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(name)) return null;
+    const input = block.input && typeof block.input === 'object' ? block.input : {};
+    const rawPath = input.file_path || input.path || input.notebook_path || input.notebookPath || null;
+    if (!rawPath || typeof rawPath !== 'string') return null;
+    const absolutePath = path.isAbsolute(rawPath) ? path.normalize(rawPath) : path.resolve(projectPath || os.homedir(), rawPath);
+    let additions = 0;
+    let deletions = 0;
+    if (name === 'Write') additions = lineCount(input.content);
+    else if (name === 'Edit') {
+      additions = lineCount(input.new_string ?? input.newString);
+      deletions = lineCount(input.old_string ?? input.oldString);
+    } else if (name === 'MultiEdit') {
+      const edits = Array.isArray(input.edits) ? input.edits : [];
+      for (const edit of edits) {
+        additions += lineCount(edit?.new_string ?? edit?.newString);
+        deletions += lineCount(edit?.old_string ?? edit?.oldString);
+      }
+    } else {
+      additions = lineCount(input.new_source ?? input.newSource ?? input.source);
+      deletions = lineCount(input.old_source ?? input.oldSource);
+    }
+    let displayPath = absolutePath;
+    if (projectPath) {
+      const relative = path.relative(projectPath, absolutePath);
+      if (relative && !relative.startsWith('..') && !path.isAbsolute(relative)) displayPath = relative;
+      else if (!relative) displayPath = path.basename(absolutePath);
+    }
+    return { path: absolutePath, displayPath, additions, deletions, tool: name };
+  }
+
+  function listRewindPoints(record) {
+    const sourceText = fs.readFileSync(record.filePath, 'utf8');
+    const lines = sourceText.split(/\r?\n/);
+    const points = [];
+    let current = null;
+
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+      const line = lines[lineIndex];
+      if (!line.trim()) continue;
+      let obj;
+      try { obj = JSON.parse(line); } catch { continue; }
+
+      const prompt = transcriptUserPrompt(obj);
+      if (prompt) {
+        current = {
+          id: prompt.checkpointId || `line:${lineIndex}`,
+          checkpointId: prompt.checkpointId,
+          lineIndex,
+          prompt: prompt.text,
+          timestamp: prompt.timestamp,
+          changes: []
+        };
+        points.push(current);
+        continue;
+      }
+
+      if (!current) continue;
+      const wrapped = obj.message && typeof obj.message === 'object' ? obj.message : obj;
+      if ((wrapped.role || obj.role) !== 'assistant') continue;
+      const content = wrapped.content ?? obj.content;
+      if (!Array.isArray(content)) continue;
+      for (const block of content) {
+        const delta = toolEditDelta(block, record.projectPath);
+        if (!delta) continue;
+        const existing = current.changes.find((item) => item.path === delta.path);
+        if (existing) {
+          existing.additions += delta.additions;
+          existing.deletions += delta.deletions;
+        } else current.changes.push(delta);
+      }
+    }
+
+    const cumulative = new Map();
+    for (let index = points.length - 1; index >= 0; index -= 1) {
+      const point = points[index];
+      point.changedFiles = point.changes.length;
+      point.additions = point.changes.reduce((sum, item) => sum + item.additions, 0);
+      point.deletions = point.changes.reduce((sum, item) => sum + item.deletions, 0);
+      for (const change of point.changes) {
+        const existing = cumulative.get(change.path);
+        if (existing) {
+          existing.additions += change.additions;
+          existing.deletions += change.deletions;
+        } else cumulative.set(change.path, { ...change });
+      }
+      point.restoreChanges = [...cumulative.values()].map((item) => ({ ...item }));
+      point.restoreChangedFiles = point.restoreChanges.length;
+      point.restoreAdditions = point.restoreChanges.reduce((sum, item) => sum + item.additions, 0);
+      point.restoreDeletions = point.restoreChanges.reduce((sum, item) => sum + item.deletions, 0);
+      point.canRestoreCode = Boolean(point.checkpointId && point.restoreChangedFiles > 0);
+    }
+    return points;
+  }
+
+  function forkSessionBeforeLine(record, lineIndex) {
+    const sourceText = fs.readFileSync(record.filePath, 'utf8');
+    const oldSessionId = record.claudeSessionId;
+    const newSessionId = crypto.randomUUID();
+    const output = [];
+    const sourceLines = sourceText.split(/\r?\n/);
+    const cutoff = Math.max(0, Math.min(sourceLines.length, Number(lineIndex) || 0));
+
+    for (let index = 0; index < cutoff; index += 1) {
+      const line = sourceLines[index];
+      if (!line.trim()) continue;
+      let obj;
+      try { obj = JSON.parse(line); } catch { output.push(line); continue; }
+      const replaceId = (target) => {
+        if (!target || typeof target !== 'object') return;
+        if (typeof target.sessionId === 'string' && (!oldSessionId || target.sessionId === oldSessionId)) target.sessionId = newSessionId;
+        if (typeof target.session_id === 'string' && (!oldSessionId || target.session_id === oldSessionId)) target.session_id = newSessionId;
+      };
+      replaceId(obj);
+      replaceId(obj.message);
+      output.push(JSON.stringify(obj));
+    }
+
+    const destination = path.join(path.dirname(record.filePath), `${newSessionId}.jsonl`);
+    if (!output.length) return { newSessionId, destination: null, empty: true };
+    fs.writeFileSync(destination, `${output.join('\n')}\n`, 'utf8');
+    return { newSessionId, destination, empty: false };
+  }
+
+  async function rewindFilesForPoint(record, point) {
+    if (!point?.checkpointId) throw new Error('This turn does not contain a Claude checkpoint ID, so code cannot be restored from it.');
+    const args = ['-p', '--resume', record.claudeSessionId, '--rewind-files', point.checkpointId];
+    await runClaudeCli(args, record.projectPath, {
+      timeout: 120000,
+      env: { CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING: 'true' }
+    });
+  }
+
+  function transcriptSliceAsText(record, startLine, endLine = Number.POSITIVE_INFINITY) {
+    const sourceLines = fs.readFileSync(record.filePath, 'utf8').split(/\r?\n/);
+    const out = [];
+    const start = Math.max(0, Number(startLine) || 0);
+    const end = Number.isFinite(endLine) ? Math.min(sourceLines.length, Number(endLine)) : sourceLines.length;
+    for (let index = start; index < end; index += 1) {
+      const line = sourceLines[index];
+      if (!line.trim()) continue;
+      let obj;
+      try { obj = JSON.parse(line); } catch { continue; }
+      const wrapped = obj.message && typeof obj.message === 'object' ? obj.message : obj;
+      const role = wrapped.role || obj.role;
+      if (role !== 'user' && role !== 'assistant') continue;
+      const content = wrapped.content ?? obj.content;
+      if (Array.isArray(content) && content.every((block) => block && typeof block === 'object' && block.type === 'tool_result')) continue;
+      const text = transcriptContentText(content).trim();
+      if (!text || /^<local-command-caveat>/i.test(text)) continue;
+      out.push(`${role === 'user' ? 'User' : 'Claude'}: ${text}`);
+    }
+    return out.join('\n\n').slice(0, 300000);
+  }
+
+  async function generateTargetedSummary(record, text, scopeLabel) {
+    if (!text.trim()) return 'No substantive conversation content was present in the selected range.';
+    const prompt = [
+      'Create a compact Claude Code conversation summary for checkpoint recovery.',
+      `Scope: ${scopeLabel}.`,
+      'Preserve requirements, decisions, unresolved tasks, file names, code behavior, commands/tests, and important errors.',
+      'Do not add advice or commentary. Return only the summary in Markdown.',
+      '',
+      text
+    ].join('\n');
+    const result = await runClaudeCode({
+      cwd: record.projectPath,
+      prompt,
+      permissionMode: 'bypassPermissions',
+      model: 'default',
+      tools: '',
+      disallowedTools: ['Bash', 'Write', 'Edit', 'NotebookEdit', 'WebFetch', 'Task', 'Agent']
+    });
+    const raw = String(result?.result || result?.stdout || result?.text || '').trim();
+    return raw || 'Conversation range summarized.';
+  }
+
+  async function seedSummarySession(record, summary, tailText = '') {
+    const newSessionId = crypto.randomUUID();
+    const prompt = [
+      '<claude-harness-rewind-summary>',
+      summary,
+      '</claude-harness-rewind-summary>',
+      tailText ? '\n<claude-harness-preserved-later-conversation>\n' + tailText + '\n</claude-harness-preserved-later-conversation>' : '',
+      '',
+      'This is recovered conversation context. Do not perform any task. Reply exactly: Context restored.'
+    ].filter(Boolean).join('\n');
+    await runClaudeCode({
+      cwd: record.projectPath,
+      prompt,
+      sessionId: newSessionId,
+      permissionMode: 'bypassPermissions',
+      model: 'default',
+      tools: '',
+      disallowedTools: ['Bash', 'Write', 'Edit', 'NotebookEdit', 'WebFetch', 'Task', 'Agent']
+    });
+    return newSessionId;
+  }
+
   function validatePrompt(value) {
     if (typeof value !== 'string') throw new Error('Prompt is required.');
     const prompt = value.trim();
@@ -1296,7 +1559,8 @@ async function main() {
           broadcastRuntime(state);
           broadcast({ type: 'session-updated', runtimeKey: state.key, claudeSessionId: state.claudeSessionId, sessionId: state.sessionId, workspaceId: state.workspaceId });
         } catch (error) {
-          try { await rescan(); } catch { /* retain original error */ }
+          log.error('Claude task failed', { error, sessionKey: state.key, workspacePath: state.workspacePath });
+          try { await rescan(); } catch (scanError) { log.warn('Rescan after Claude task failure also failed', { error: scanError }); }
           if (cancelledRuns.has(state.key)) {
             cancelledRuns.delete(state.key);
             runtimeStore.cancel(state);
@@ -1401,6 +1665,7 @@ async function main() {
       runtimeStore.updateSideQuestion(state, item.id, { status: 'done', answer: String(result.result || '').trim(), error: null });
       broadcastRuntime(state);
     } catch (error) {
+      log.warn('BTW side question failed', { error, sessionKey: state.key });
       runtimeStore.updateSideQuestion(state, item.id, { status: 'error', error: error?.message || String(error), answer: '' });
       broadcastRuntime(state);
     } finally {
@@ -1449,9 +1714,9 @@ async function main() {
     return { state, item };
   }
 
-  console.log(`Claude Harness: scanning ${args.root} (max depth ${MAX_DEPTH})…`);
+  log.info('Scanning Claude workspaces', { root: args.root, maxDepth: MAX_DEPTH, scanLocations: harnessSettings.scanLocations?.length || 0 });
   await rescan();
-  console.log(`Claude Harness: found ${workspaceCache.length} workspace(s), ${workspaceCache.reduce((n, w) => n + w.sessionCount, 0)} session(s).`);
+  log.info('Workspace scan complete', { workspaces: workspaceCache.length, sessions: workspaceCache.reduce((n, w) => n + w.sessionCount, 0) });
 
   const app = express();
   const server = http.createServer(app);
@@ -1459,6 +1724,27 @@ async function main() {
   const wsClients = new Set();
   const wss = new WebSocketServer({ noServer: true });
   app.disable('x-powered-by');
+  app.use((req, res, next) => {
+    const startedAt = Date.now();
+    const originalJson = res.json.bind(res);
+    res.json = (body) => {
+      if (body && typeof body === 'object' && typeof body.error === 'string') res.locals.harnessError = body.error;
+      return originalJson(body);
+    };
+    res.on('finish', () => {
+      const details = {
+        method: req.method,
+        path: req.path,
+        status: res.statusCode,
+        durationMs: Date.now() - startedAt,
+        ...(res.locals.harnessError ? { errorMessage: res.locals.harnessError } : {})
+      };
+      if (res.statusCode >= 500) log.error('HTTP request failed', details);
+      else if (res.statusCode >= 400) log.warn('HTTP request rejected', details);
+      else if (process.env.CH_LOG_HTTP === '1') log.info('HTTP request', details);
+    });
+    next();
+  });
   app.use(express.json({ limit: '16mb' }));
 
   broadcast = (payload) => {
@@ -1495,6 +1781,7 @@ async function main() {
     try { pathname = new URL(req.url, 'http://localhost').pathname; } catch { pathname = req.url || ''; }
     if (pathname !== '/ws') return;
     if (!requestAuthenticated(req, auth)) {
+      log.warn('Rejected unauthenticated WebSocket upgrade', { remoteAddress: req.socket?.remoteAddress });
       socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
       socket.destroy();
       return;
@@ -1510,7 +1797,11 @@ async function main() {
     if (!auth.enabled) return res.json({ ok: true, authenticated: true, enabled: false });
     const userOk = timingSafeStringEqual(req.body?.user, auth.user);
     const passwordOk = timingSafeStringEqual(req.body?.password, auth.password);
-    if (!userOk || !passwordOk) return res.status(401).json({ error: 'Invalid username or password.' });
+    if (!userOk || !passwordOk) {
+      log.warn('Login rejected', { remoteAddress: req.socket?.remoteAddress });
+      return res.status(401).json({ error: 'Invalid username or password.' });
+    }
+    log.info('User authenticated', { user: auth.user, remoteAddress: req.socket?.remoteAddress });
     setAuthCookie(res, auth);
     return res.json({ ok: true, authenticated: true, user: auth.user });
   });
@@ -1526,8 +1817,9 @@ async function main() {
     return res.status(401).json({ error: 'Authentication required.', code: 'AUTH_REQUIRED' });
   });
 
-  wss.on('connection', (socket) => {
+  wss.on('connection', (socket, request) => {
     wsClients.add(socket);
+    log.debug('WebSocket client connected', { remoteAddress: request?.socket?.remoteAddress, clients: wsClients.size });
     socket.isAlive = true;
     socket.on('pong', () => { socket.isAlive = true; });
     sendSocketSnapshot(socket);
@@ -1583,12 +1875,19 @@ async function main() {
         }
         throw new Error(`Unsupported WebSocket message: ${message.type || 'unknown'}`);
       } catch (error) {
+        log.warn('WebSocket request failed', { error, type: message?.type || 'unknown' });
         socketReply(socket, requestId, false, { error: error.message || String(error) });
       }
     });
 
-    socket.on('close', () => wsClients.delete(socket));
-    socket.on('error', () => wsClients.delete(socket));
+    socket.on('close', () => {
+      wsClients.delete(socket);
+      log.debug('WebSocket client disconnected', { clients: wsClients.size });
+    });
+    socket.on('error', (error) => {
+      wsClients.delete(socket);
+      log.warn('WebSocket client error', { error, clients: wsClients.size });
+    });
   });
 
   const wsHeartbeat = setInterval(() => {
@@ -1682,6 +1981,7 @@ async function main() {
       harnessSettings = normalizeHarnessSettings(req.body || {}, { strict: true });
       saveHarnessSettings();
       await rescan();
+      log.info('Settings saved and workspace discovery rescanned', { scanLocations: harnessSettings.scanLocations.length, workspaces: workspaceCache.length });
       return res.json({ ok: true, settings: publicHarnessSettings(), meta: scanMeta, workspaces: publicWorkspaces() });
     } catch (error) {
       return res.status(400).json({ error: error.message || 'Unable to save settings.' });
@@ -1689,7 +1989,9 @@ async function main() {
   });
   app.post('/api/settings/rescan', async (_req, res) => {
     try {
+      const startedAt = Date.now();
       await rescan();
+      log.info('Workspace discovery rescan requested', { workspaces: workspaceCache.length, sessions: workspaceCache.reduce((count, item) => count + item.sessionCount, 0), durationMs: Date.now() - startedAt });
       return res.json({ ok: true, settings: publicHarnessSettings(), meta: scanMeta, workspaces: publicWorkspaces() });
     } catch (error) {
       return res.status(500).json({ error: error.message || 'Rescan failed.' });
@@ -2033,6 +2335,135 @@ async function main() {
     } catch (error) { return res.status(500).json({ error: error.message || 'Unable to update MCP server.' }); }
   });
 
+  app.get('/api/session/:id/rewind', (req, res) => {
+    const record = scanner.getSessionRecord(req.params.id);
+    if (!record) return res.status(404).json({ error: 'Session not found.' });
+    try {
+      const points = listRewindPoints(record).map((point) => ({
+        id: point.id,
+        checkpointId: point.checkpointId,
+        prompt: point.prompt,
+        timestamp: point.timestamp,
+        changes: point.changes.map((item) => ({ displayPath: item.displayPath, additions: item.additions, deletions: item.deletions, tool: item.tool })),
+        changedFiles: point.changedFiles,
+        additions: point.additions,
+        deletions: point.deletions,
+        canRestoreCode: point.canRestoreCode,
+        restoreChanges: point.restoreChanges.map((item) => ({ displayPath: item.displayPath, additions: item.additions, deletions: item.deletions, tool: item.tool })),
+        restoreChangedFiles: point.restoreChangedFiles,
+        restoreAdditions: point.restoreAdditions,
+        restoreDeletions: point.restoreDeletions
+      }));
+      return res.json({
+        sessionId: req.params.id,
+        claudeSessionId: record.claudeSessionId,
+        projectPath: record.projectPath,
+        points
+      });
+    } catch (error) {
+      log.warn('Unable to list rewind checkpoints', { error, sessionId: req.params.id });
+      return res.status(500).json({ error: `Unable to read rewind checkpoints: ${error.message}` });
+    }
+  });
+
+  app.post('/api/session/:id/rewind', async (req, res) => {
+    const record = scanner.getSessionRecord(req.params.id);
+    if (!record) return res.status(404).json({ error: 'Session not found.' });
+    const runtime = runtimeStore.get(record.claudeSessionId) || runtimeStore.get(req.params.id);
+    if (runtime?.active || runtime?.status === 'running' || runtime?.status === 'waiting_approval') {
+      return res.status(409).json({ error: 'Stop the active Claude task before rewinding this session.' });
+    }
+
+    const action = String(req.body?.action || '');
+    const allowedActions = new Set(['restore_code_conversation', 'restore_conversation', 'restore_code', 'summarize_from', 'summarize_up_to']);
+    if (!allowedActions.has(action)) return res.status(400).json({ error: 'Unsupported rewind action.' });
+
+    let points;
+    try { points = listRewindPoints(record); }
+    catch (error) { return res.status(500).json({ error: `Unable to read rewind checkpoints: ${error.message}` }); }
+    const pointId = String(req.body?.pointId || '');
+    const point = points.find((item) => item.id === pointId);
+    if (!point) return res.status(404).json({ error: 'That rewind checkpoint is no longer available. Reopen /rewind and try again.' });
+
+    const finishFork = async (newSessionId, draft = '', nameSuffix = 'rewind') => {
+      if (draft) uiStateStore.set('draft', newSessionId, draft);
+      const sourceName = sessionNames[record.claudeSessionId]
+        || sessionNames[record.id]
+        || firstUsefulName(scanner.parseSessionFile(record.filePath), record.filePath);
+      if (sourceName) {
+        sessionNames[newSessionId] = `${sourceName} · ${nameSuffix}`.slice(0, 120);
+        saveSessionNames();
+      }
+      await rescan();
+      const found = findSessionByClaudeId(newSessionId);
+      if (!found) throw new Error('The rewound session was created but could not be indexed.');
+      return {
+        ok: true,
+        mode: 'session',
+        workspaceId: found.workspace.id,
+        sessionId: found.session.id,
+        claudeSessionId: newSessionId,
+        draft
+      };
+    };
+
+    try {
+      if (action === 'restore_code' || action === 'restore_code_conversation') {
+        if (!point.canRestoreCode) return res.status(400).json({ error: 'Claude did not record restorable file edits for this checkpoint.' });
+        await rewindFilesForPoint(record, point);
+      }
+
+      if (action === 'restore_code') {
+        fileIndexCache.delete(path.resolve(record.projectPath));
+        broadcast({ type: 'files-changed', workspacePath: record.projectPath, sessionId: record.claudeSessionId });
+        return res.json({ ok: true, mode: 'same', sessionId: req.params.id, claudeSessionId: record.claudeSessionId });
+      }
+
+      if (action === 'restore_conversation' || action === 'restore_code_conversation') {
+        const forked = forkSessionBeforeLine(record, point.lineIndex);
+        if (forked.empty) {
+          const draftKey = `new:${record.projectPath}`;
+          uiStateStore.set('draft', draftKey, point.prompt);
+          return res.json({ ok: true, mode: 'new', workspacePath: record.projectPath, draft: point.prompt });
+        }
+        const body = await finishFork(forked.newSessionId, point.prompt, 'rewind');
+        return res.json(body);
+      }
+
+      if (action === 'summarize_from') {
+        const rangeText = transcriptSliceAsText(record, point.lineIndex);
+        const summary = await generateTargetedSummary(record, rangeText, 'selected message through the current end of the session');
+        const forked = forkSessionBeforeLine(record, point.lineIndex);
+        let newSessionId = forked.newSessionId;
+        const summaryPrompt = [
+          '<claude-harness-rewind-summary>', summary, '</claude-harness-rewind-summary>',
+          'This is recovered conversation context. Do not perform any task. Reply exactly: Context restored.'
+        ].join('\n');
+        if (forked.empty) {
+          newSessionId = await seedSummarySession(record, summary);
+        } else {
+          await runClaudeCode({ cwd: record.projectPath, prompt: summaryPrompt, resumeId: newSessionId, permissionMode: 'bypassPermissions', model: 'default', tools: '', disallowedTools: ['Bash', 'Write', 'Edit', 'NotebookEdit', 'WebFetch', 'Task', 'Agent'] });
+        }
+        const body = await finishFork(newSessionId, point.prompt, 'summary');
+        return res.json(body);
+      }
+
+      if (action === 'summarize_up_to') {
+        const beforeText = transcriptSliceAsText(record, 0, point.lineIndex);
+        const laterText = transcriptSliceAsText(record, point.lineIndex);
+        const summary = await generateTargetedSummary(record, beforeText, 'start of the session through the message immediately before the selected checkpoint');
+        const newSessionId = await seedSummarySession(record, summary, laterText);
+        const body = await finishFork(newSessionId, '', 'summary');
+        return res.json(body);
+      }
+
+      return res.status(400).json({ error: 'Unsupported rewind action.' });
+    } catch (error) {
+      log.error('Rewind action failed', { error, sessionId: req.params.id, action, pointId });
+      return res.status(500).json({ error: `Rewind failed: ${error.message}` });
+    }
+  });
+
   app.get('/api/session/:id', (req, res) => {
     const record = scanner.getSessionRecord(req.params.id);
     if (!record) return res.status(404).json({ error: 'Session not found. Rescan if the file moved.' });
@@ -2137,15 +2568,15 @@ async function main() {
   server.listen(args.port, args.host, () => {
     const localUrl = `http://localhost:${args.port}`;
     const displayHost = args.host === '0.0.0.0' || args.host === '::' ? '<this-computer-ip>' : args.host;
-    console.log(`Claude Harness (${devMode ? 'development' : 'production'}): http://${displayHost}:${args.port}`);
-    if (auth.enabled) console.log(`Authentication enabled for CH_USER=${auth.user}.`);
+    log.info('Claude Harness listening', { mode: devMode ? 'development' : 'production', url: `http://${displayHost}:${args.port}`, browserAutoOpen: args.open });
+    if (auth.enabled) log.info('Authentication enabled', { user: auth.user });
     else {
-      console.log('Authentication disabled because CH_USER / CH_PASSWORD are not set.');
+      log.info('Authentication disabled because CH_USER / CH_PASSWORD are not set');
       if (!['127.0.0.1', 'localhost', '::1'].includes(args.host)) {
-        console.warn('WARNING: Claude Harness is listening beyond localhost without authentication. Set CH_USER and CH_PASSWORD before using LAN/public bindings.');
+        log.warn('Listening beyond localhost without authentication; set CH_USER and CH_PASSWORD before LAN/public use', { host: args.host });
       }
     }
-    if (devMode) console.log('Vite HMR is mounted on the same HTTP server; no :5173 process is used.');
+    if (devMode) log.info('Vite HMR mounted on the same HTTP server');
     for (const state of runtimeStore.sessions.values()) {
       if (runtimeStore.nextRunnable(state)) setImmediate(() => processRuntimeQueue(state));
     }
@@ -2153,7 +2584,7 @@ async function main() {
   });
 
   server.on('error', (error) => {
-    console.error(`Server error: ${error.message}`);
+    log.error('HTTP server error', { error });
     process.exitCode = 1;
   });
 
@@ -2172,10 +2603,18 @@ async function main() {
   return server;
 }
 
+process.on('unhandledRejection', (reason) => {
+  log.error('Unhandled promise rejection', { error: reason instanceof Error ? reason : new Error(String(reason)) });
+});
+process.on('uncaughtException', (error) => {
+  log.error('Uncaught exception', { error });
+  process.exit(1);
+});
+
 if (require.main === module) {
   if (!maybeRunStatusLineHelper()) {
     main().catch((error) => {
-      console.error(error?.stack || error?.message || String(error));
+      log.error('Fatal startup error', { error });
       process.exitCode = 1;
     });
   }

@@ -6,9 +6,11 @@
 process.env.CLAUDE_HARNESS_DEV = '1';
 process.env.NODE_ENV = 'development';
 
+const { createLogger } = require('../lib/logger');
 const { main } = require('../index');
+const log = createLogger('dev');
 
 main().catch((error) => {
-  console.error(error?.stack || error?.message || String(error));
+  log.error('Development server failed', { error });
   process.exitCode = 1;
 });

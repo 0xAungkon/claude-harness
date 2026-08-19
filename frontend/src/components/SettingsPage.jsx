@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ClaudeMark, FolderIcon, MenuIcon, PlusIcon, RefreshIcon, SettingsIcon, TrashIcon, XIcon } from '../icons';
 
 const MAX_DEPTH = 20;
@@ -26,7 +26,76 @@ function cloneSettings(settings, root) {
   };
 }
 
-function LocationRow({ item, onChange, onRemove }) {
+function LocationRow({ item, onChange, onRemove, apiFetch }) {
+  const [focused, setFocused] = useState(false);
+  const [suggestions, setSuggestions] = useState([]);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const requestRef = useRef(0);
+
+  const canSuggest = item.type === 'path';
+
+  useEffect(() => {
+    if (!focused || !canSuggest) {
+      setSuggestions([]);
+      setLoadingSuggestions(false);
+      return undefined;
+    }
+
+    const requestId = ++requestRef.current;
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setLoadingSuggestions(true);
+      try {
+        const params = new URLSearchParams({ input: String(item.value || '') });
+        const response = await apiFetch(`/api/directories?${params.toString()}`, { cache: 'no-store', signal: controller.signal });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body.error || 'Unable to browse folders.');
+        if (requestRef.current !== requestId) return;
+        setSuggestions(Array.isArray(body.entries) ? body.entries.slice(0, 24) : []);
+        setActiveIndex(0);
+      } catch (error) {
+        if (error?.name !== 'AbortError' && requestRef.current === requestId) setSuggestions([]);
+      } finally {
+        if (!controller.signal.aborted && requestRef.current === requestId) setLoadingSuggestions(false);
+      }
+    }, 90);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [focused, canSuggest, item.value, apiFetch]);
+
+  const completePath = (entry) => {
+    if (!entry?.path) return;
+    const separator = entry.path.includes('\\') && !entry.path.includes('/') ? '\\' : '/';
+    const nextValue = entry.path.endsWith('/') || entry.path.endsWith('\\') ? entry.path : `${entry.path}${separator}`;
+    onChange({ ...item, value: nextValue });
+    setActiveIndex(0);
+  };
+
+  const handlePathKeyDown = (event) => {
+    if (!focused || !canSuggest || !suggestions.length) return;
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      setActiveIndex((current) => {
+        if (event.key === 'ArrowDown') return (current + 1) % suggestions.length;
+        return (current - 1 + suggestions.length) % suggestions.length;
+      });
+      return;
+    }
+    if (event.key === 'Tab' || event.key === 'Enter') {
+      event.preventDefault();
+      completePath(suggestions[Math.max(0, Math.min(activeIndex, suggestions.length - 1))]);
+      return;
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      setFocused(false);
+    }
+  };
+
   return (
     <div className="rounded-2xl border border-harness-border bg-harness-panel p-3.5 sm:p-4">
       <div className="grid gap-3 lg:grid-cols-[120px_minmax(0,1fr)_112px_36px] lg:items-end">
@@ -42,19 +111,50 @@ function LocationRow({ item, onChange, onRemove }) {
           </select>
         </label>
 
-        <label className="block min-w-0">
+        <div className="block min-w-0">
           <span className="mb-1.5 block text-[12px] font-semibold uppercase tracking-[0.1em] text-harness-muted">{item.type === 'regex' ? 'Path regular expression' : 'Folder path'}</span>
           <div className="relative">
-            <FolderIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-harness-muted" />
+            <FolderIcon className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-harness-muted" />
             <input
               value={item.value}
               onChange={(event) => onChange({ ...item, value: event.target.value })}
+              onFocus={() => setFocused(true)}
+              onBlur={() => window.setTimeout(() => setFocused(false), 120)}
+              onKeyDown={handlePathKeyDown}
               placeholder={item.type === 'regex' ? '^/home/joy/(project1|project2)$' : '/home/joy/project1'}
               spellCheck={false}
+              autoComplete="off"
               className="settings-input h-10 w-full rounded-xl border border-harness-border bg-harness-body pl-9 pr-3 font-mono text-[13px] text-harness-primary outline-none"
             />
+
+            {focused && canSuggest && (loadingSuggestions || suggestions.length > 0) && (
+              <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-[80] overflow-hidden rounded-xl border border-harness-border bg-harness-panel shadow-[0_18px_48px_rgba(33,29,24,.16)]">
+                <div className="max-h-64 overflow-y-auto p-1.5 harness-scroll">
+                  {loadingSuggestions && !suggestions.length ? (
+                    <div className="px-3 py-2.5 text-[13px] text-harness-muted">Finding folders…</div>
+                  ) : suggestions.map((entry, index) => (
+                    <button
+                      key={entry.path}
+                      type="button"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => completePath(entry)}
+                      onMouseEnter={() => setActiveIndex(index)}
+                      className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition ${index === activeIndex ? 'bg-harness-hover' : 'hover:bg-harness-hover'}`}
+                    >
+                      <FolderIcon className="h-4 w-4 shrink-0 text-harness-accent" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[13px] font-medium text-harness-primary">{entry.name}</span>
+                        <span className="block truncate font-mono text-[11px] text-harness-muted">{entry.path}</span>
+                      </span>
+                      {entry.isWorkspace && <span className="shrink-0 rounded-full bg-harness-active px-2 py-0.5 text-[10px] font-semibold text-harness-accent">Workspace</span>}
+                    </button>
+                  ))}
+                </div>
+                <div className="border-t border-harness-border px-3 py-1.5 text-[10px] text-harness-muted">↑↓ navigate · Enter/Tab complete · Esc close</div>
+              </div>
+            )}
           </div>
-        </label>
+        </div>
 
         <label className="block">
           <span className="mb-1.5 block text-[12px] font-semibold uppercase tracking-[0.1em] text-harness-muted">Depth</span>
@@ -75,15 +175,14 @@ function LocationRow({ item, onChange, onRemove }) {
       <p className="mt-2.5 text-[12px] leading-5 text-harness-muted">
         {item.type === 'regex'
           ? `Regex is matched against absolute workspace paths. Depth controls how far Harness discovers directories beneath the CLI scan root (0–${MAX_DEPTH}).`
-          : 'Depth 0 includes only this exact workspace. Increase it to include nested project folders.'}
+          : 'Depth 0 includes only this exact workspace. Type a partial path such as /home/oxa/pro and use the folder suggestions to drill down.'}
       </p>
     </div>
   );
 }
 
 export default function SettingsPage({
-  meta, apiFetch, onReloadWorkspaces, onClose, onLogout = null,
-  socketConnected = false, theme = 'light', onToggleTheme = () => {}, onOpenSidebar = () => {}
+  meta, apiFetch, onReloadWorkspaces, onClose, onLogout = null, onOpenSidebar = () => {}
 }) {
   const [saved, setSaved] = useState(null);
   const [draft, setDraft] = useState(null);
@@ -215,21 +314,17 @@ export default function SettingsPage({
                 </div>
 
                 <div className="space-y-3">
-                  {locations.map((item) => <LocationRow key={item.id} item={item} onChange={(next) => replaceLocation(item.id, next)} onRemove={() => removeLocation(item.id)} />)}
+                  {locations.map((item) => <LocationRow key={item.id} item={item} apiFetch={apiFetch} onChange={(next) => replaceLocation(item.id, next)} onRemove={() => removeLocation(item.id)} />)}
                   {locations.length === 0 && (
                     <button type="button" onClick={() => setDraft((current) => ({ ...current, scanLocations: [newLocation(meta?.root || '')] }))} className="flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-harness-border bg-harness-panel px-4 py-8 text-[14px] font-medium text-harness-muted transition hover:bg-harness-hover hover:text-harness-primary"><PlusIcon className="h-4 w-4" />Add your first scan location</button>
                   )}
                 </div>
               </section>
 
-              <section className="grid gap-3 sm:grid-cols-3">
+              <section className="grid gap-3 sm:grid-cols-2">
                 <div className="rounded-2xl border border-harness-border bg-harness-panel p-4">
                   <div className="text-[12px] font-semibold uppercase tracking-[0.1em] text-harness-muted">CLI scan root</div>
                   <div className="mt-2 break-all font-mono text-[13px] text-harness-primary">{meta?.root || '—'}</div>
-                </div>
-                <div className="rounded-2xl border border-harness-border bg-harness-panel p-4">
-                  <div className="text-[12px] font-semibold uppercase tracking-[0.1em] text-harness-muted">WebSocket</div>
-                  <div className="mt-2 text-[14px] font-medium text-harness-primary">{socketConnected ? 'Connected' : 'Reconnecting'}</div>
                 </div>
                 <div className="rounded-2xl border border-harness-border bg-harness-panel p-4">
                   <div className="text-[12px] font-semibold uppercase tracking-[0.1em] text-harness-muted">Last scan</div>

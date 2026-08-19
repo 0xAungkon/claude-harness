@@ -87,6 +87,7 @@ export default function App() {
   const [loadingSession, setLoadingSession] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
+  const [connectionToast, setConnectionToast] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -105,6 +106,8 @@ export default function App() {
   const lastApprovalIdsRef = useRef(new Set());
   const lastRuntimeStatesRef = useRef(new Map());
   const postLoginPathRef = useRef(typeof window !== 'undefined' && window.location.pathname.startsWith('/app') ? window.location.pathname : '/app');
+  const websocketEverConnectedRef = useRef(false);
+  const websocketToastTimerRef = useRef(null);
 
   const navigatePath = useCallback((pathname, { replace = false } = {}) => {
     if (typeof window === 'undefined' || window.location.pathname === pathname) return;
@@ -263,6 +266,30 @@ export default function App() {
   }, [fetchSession, loadWorkspaces, navigatePath]);
 
   const socket = useHarnessSocket({ enabled: !auth.loading && auth.authenticated, onEvent: handleSocketEvent });
+
+  useEffect(() => {
+    window.clearTimeout(websocketToastTimerRef.current);
+    if (!auth.authenticated) {
+      setConnectionToast(null);
+      websocketEverConnectedRef.current = false;
+      return undefined;
+    }
+
+    if (socket.connected) {
+      if (websocketEverConnectedRef.current && connectionToast?.kind === 'warning') {
+        setConnectionToast({ kind: 'success', message: 'Live connection restored.' });
+        websocketToastTimerRef.current = window.setTimeout(() => setConnectionToast(null), 2200);
+      }
+      websocketEverConnectedRef.current = true;
+      return () => window.clearTimeout(websocketToastTimerRef.current);
+    }
+
+    const delay = websocketEverConnectedRef.current ? 0 : 850;
+    websocketToastTimerRef.current = window.setTimeout(() => {
+      setConnectionToast({ kind: 'warning', message: socket.reconnecting ? 'Live connection lost. Reconnecting…' : 'Live connection unavailable. Reconnecting…' });
+    }, delay);
+    return () => window.clearTimeout(websocketToastTimerRef.current);
+  }, [auth.authenticated, socket.connected, socket.reconnecting]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!auth.authenticated) return;
@@ -437,6 +464,67 @@ export default function App() {
     }
   };
 
+  const loadRewindPoints = async (session) => {
+    if (!session?.id || session.runtimeOnly) throw new Error('Wait for the first Claude response before using rewind.');
+    const response = await apiFetch(`/api/session/${encodeURIComponent(session.id)}/rewind`, { cache: 'no-store' });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || 'Unable to load rewind checkpoints.');
+    return body;
+  };
+
+  const applyRewind = async (session, point, action) => {
+    if (!session?.id || !point?.id) throw new Error('Choose a rewind checkpoint first.');
+    setError('');
+    const response = await apiFetch(`/api/session/${encodeURIComponent(session.id)}/rewind`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pointId: point.id, action })
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const err = new Error(body.error || 'Unable to rewind this session.');
+      setError(err.message);
+      throw err;
+    }
+
+    if (body.mode === 'same') {
+      const refreshed = await fetchSession(session.id);
+      setSelected(refreshed);
+      await loadWorkspaces();
+      return body;
+    }
+
+    if (body.mode === 'new') {
+      const nextWorkspaces = await loadWorkspaces();
+      const owner = nextWorkspaces.find((ws) => ws.path === body.workspacePath)
+        || selectedWorkspace
+        || nextWorkspaces[0]
+        || null;
+      setSelected(null);
+      setSelectedWorkspace(owner);
+      setRightSidebarOpen(false);
+      setSettingsOpen(false);
+      setMobileSidebarOpen(false);
+      setNewSessionKey((value) => value + 1);
+      navigatePath('/app');
+      return body;
+    }
+
+    if (body.mode === 'session' && body.sessionId) {
+      const nextWorkspaces = await loadWorkspaces();
+      const owner = nextWorkspaces.find((ws) => ws.sessions.some((item) => item.id === body.sessionId));
+      if (!owner) throw new Error('The rewound session was created, but it could not be found after rescanning.');
+      const rewound = await fetchSession(body.sessionId);
+      setSelected(rewound);
+      setSelectedWorkspace(owner);
+      setMobileSidebarOpen(false);
+      navigatePath(`/app/session/${encodeURIComponent(body.sessionId)}`);
+      return body;
+    }
+
+    return body;
+  };
+
   const startNewSession = async (workspace, prompt, suppliedOptions = null) => {
     if (!workspace) throw new Error('Choose a workspace first.');
     setError('');
@@ -604,6 +692,12 @@ export default function App() {
 
   return (
     <div className="theme-root flex h-screen overflow-hidden bg-harness-body text-harness-primary" data-theme={theme}>
+      {connectionToast && (
+        <div className={`connection-toast fixed right-3 top-3 z-[220] flex max-w-[min(420px,calc(100vw-24px))] items-center gap-2.5 rounded-xl border px-3.5 py-2.5 text-[13px] font-medium shadow-lg sm:right-4 sm:top-4 ${connectionToast.kind === 'success' ? 'connection-toast-success' : 'connection-toast-warning'}`} role="status" aria-live="polite">
+          <span className="h-2 w-2 shrink-0 rounded-full bg-current opacity-80" />
+          <span>{connectionToast.message}</span>
+        </div>
+      )}
       <Sidebar
         workspaces={workspaces} selectedId={selected?.id} onSelect={selectSession} onRefresh={refresh} refreshing={refreshing}
         onOpenSettings={openSettings} onNewSession={newSession} onRenameSession={renameSession} onForkSession={forkSession}
@@ -619,8 +713,8 @@ export default function App() {
         {settingsOpen ? (
           <SettingsPage
             meta={{ ...meta, authEnabled: auth.enabled, user: auth.user }} apiFetch={apiFetch} onReloadWorkspaces={loadWorkspaces}
-            onClose={closeSettings} onLogout={auth.enabled ? logout : null} socketConnected={socket.connected}
-            theme={theme} onToggleTheme={toggleTheme} onOpenSidebar={() => setMobileSidebarOpen(true)}
+            onClose={closeSettings} onLogout={auth.enabled ? logout : null}
+            onOpenSidebar={() => setMobileSidebarOpen(true)}
           />
         ) : selected ? (
           <SessionView
@@ -633,6 +727,7 @@ export default function App() {
             socketConnected={socket.connected} socketReconnecting={socket.reconnecting}
             theme={theme} onToggleTheme={toggleTheme} onOpenSidebar={() => setMobileSidebarOpen(true)} onNewSession={newSession} onRenameSession={renameSession}
             onStop={stopSession} onBtw={askBtw} onForkMessage={(turn) => forkSession(selected, turn?.timestamp || null)}
+            onLoadRewind={() => loadRewindPoints(selected)} onApplyRewind={(point, action) => applyRewind(selected, point, action)}
             notesOpen={rightSidebarOpen} onToggleNotes={() => setRightSidebarOpen((value) => !value)} {...composerProps}
           />
         ) : (

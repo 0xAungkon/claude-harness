@@ -1,5 +1,31 @@
 # Changelog
 
+## v4.3 — rewind improvements
+
+- Session context-menu **Copy path** copies the workspace/folder path rather than the `.jsonl` transcript path.
+- `/rewind` is handled by Harness as a native checkpoint workflow instead of being sent as prompt text.
+- The first rewind step lists prior user turns with their tracked file-edit summaries.
+- Selecting a turn opens the five checkpoint actions: **Restore code and conversation**, **Restore conversation**, **Restore code**, **Summarize from here**, and **Summarize up to here**.
+- Conversation restore actions fork the original session and restore the selected prompt into the new session draft.
+- New Harness-launched Claude turns enable Claude Code file checkpointing so future code restores can use Claude's checkpoint UUIDs. Historical sessions that do not contain usable file checkpoint snapshots can still use conversation rewind, but Claude Code may reject code restore for those older checkpoints.
+
+## v4.2 — application-style prompt resizing
+
+- Removed the browser's native textarea resize grip.
+- Resize the prompt area by dragging its **top edge**, **top-left corner**, or **top-right corner**. Drag upward to make the composer taller and downward to make it shorter.
+- The resize edge has a subtle UI-aligned grab indicator and supports touch/pointer input.
+- The saved composer height continues to apply across sessions and is restored after page reloads.
+- The focused top resize edge also supports Arrow Up/Down for keyboard resizing.
+
+## v4.1 — settings path autocomplete, quiet startup, connection toasts, structured logs
+
+- Folder scan rules in **Settings → General → Workspace discovery** now autocomplete as you type. For example, `/home/oxa/` lists its direct child folders and `/home/oxa/pro` filters to matching folders. Use **Up/Down** to move, **Enter/Tab** to complete, and keep drilling into the next directory.
+- Harness no longer opens a browser window automatically. `npm run dev`, `npm start`, and the standalone binary simply start the server. Use `--open` (or the `dev:open` / `start:open` scripts) when you explicitly want browser auto-open.
+- The WebSocket status card was removed from Settings. If the live socket cannot connect or disconnects, the app now shows a global reconnecting toast; a short restored toast appears after reconnection.
+- The delete dialog keeps its Left/Right/Enter/Esc keyboard behavior but no longer displays the keyboard-instruction footer.
+- Terminal output now uses timestamped structured log levels. Server startup, scans, authentication state, runtime failures, persistence warnings, WebSocket errors, HTTP 4xx/5xx responses, and fatal process errors are logged without exposing Harness passwords/tokens.
+- Set `CH_LOG_LEVEL=debug|info|warn|error|silent` to control verbosity. Set `CH_LOG_HTTP=1` if you also want successful HTTP requests logged.
+
 ## v4.0 — persistent drafts, resizable composer, session notepad
 
 - The prompt composer is vertically resizable. Its height is remembered across sessions in the browser.

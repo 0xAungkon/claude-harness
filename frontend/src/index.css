@@ -840,14 +840,96 @@ button { user-select: none; }
   -webkit-text-fill-color: var(--text-primary);
 }
 
-/* v4.0 — resizable composer + persistent session notepad */
+/* v4.2 — application-style composer resizing from the top edge/corners.
+   The native textarea resize grip is intentionally disabled. */
 .composer-root .mention-textarea {
   min-height: 64px;
-  max-height: min(44vh, 420px);
-  resize: vertical;
+  max-height: 100%;
+  resize: none;
+  overflow-y: auto;
 }
 .composer-root .mention-editor {
   min-height: 64px;
+  max-height: min(44vh, 420px);
+}
+.composer-resize-edge {
+  position: absolute;
+  z-index: 8;
+  top: -7px;
+  left: 20px;
+  right: 20px;
+  height: 16px;
+  cursor: ns-resize;
+  touch-action: none;
+  outline: none;
+}
+.composer-resize-edge::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 6px;
+  width: 48px;
+  height: 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-muted) 30%, transparent);
+  transform: translateX(-50%);
+  opacity: .62;
+  transition: width .16s ease, opacity .16s ease, background-color .16s ease;
+}
+.composer-resize-edge:hover::after,
+.composer-resize-edge:focus-visible::after,
+body.composer-resizing .composer-resize-edge::after {
+  width: 64px;
+  opacity: 1;
+  background: color-mix(in srgb, var(--accent) 75%, var(--border));
+}
+.composer-resize-corner {
+  position: absolute;
+  z-index: 9;
+  top: -8px;
+  width: 30px;
+  height: 24px;
+  touch-action: none;
+}
+.composer-resize-corner-left {
+  left: -7px;
+  cursor: nwse-resize;
+}
+.composer-resize-corner-right {
+  right: -7px;
+  cursor: nesw-resize;
+}
+.composer-resize-corner::after {
+  content: '';
+  position: absolute;
+  top: 8px;
+  width: 10px;
+  height: 10px;
+  opacity: 0;
+  transition: opacity .15s ease, border-color .15s ease;
+}
+.composer-resize-corner-left::after {
+  left: 8px;
+  border-left: 2px solid var(--border);
+  border-top: 2px solid var(--border);
+  border-top-left-radius: 5px;
+}
+.composer-resize-corner-right::after {
+  right: 8px;
+  border-right: 2px solid var(--border);
+  border-top: 2px solid var(--border);
+  border-top-right-radius: 5px;
+}
+.composer-card:hover .composer-resize-corner::after,
+.composer-resize-corner:hover::after,
+body.composer-resizing .composer-resize-corner::after {
+  opacity: .8;
+  border-color: var(--accent);
+}
+body.composer-resizing,
+body.composer-resizing * {
+  cursor: ns-resize !important;
+  user-select: none !important;
 }
 
 .session-notes-sidebar {
@@ -1002,7 +1084,7 @@ button { user-select: none; }
 .notes-mobile-backdrop { display: none; }
 
 @media (max-width: 767px) {
-  .composer-root .mention-textarea { max-height: min(38vh, 320px); }
+  .composer-root .mention-editor { max-height: min(38vh, 320px); }
   .notes-mobile-backdrop {
     position: fixed;
     inset: 0;
@@ -1034,4 +1116,27 @@ button { user-select: none; }
   .notes-editor-shell { padding: 10px; }
   .notes-editor { border-radius: 13px; font-size: 16px; line-height: 1.6; }
   .notes-footer { padding-bottom: env(safe-area-inset-bottom); min-height: calc(38px + env(safe-area-inset-bottom)); }
+}
+
+/* Global live-connection toast */
+.connection-toast { backdrop-filter: blur(10px); }
+.connection-toast-warning {
+  color: #8a5a00;
+  background: color-mix(in srgb, #fff5cf 94%, var(--bg-panel));
+  border-color: color-mix(in srgb, #d9a21b 45%, var(--border));
+}
+.connection-toast-success {
+  color: #28724d;
+  background: color-mix(in srgb, #e8f7ef 94%, var(--bg-panel));
+  border-color: color-mix(in srgb, #56a87d 40%, var(--border));
+}
+.theme-root[data-theme="dark"] .connection-toast-warning {
+  color: #ffd36b;
+  background: #2d2615;
+  border-color: #655321;
+}
+.theme-root[data-theme="dark"] .connection-toast-success {
+  color: #8cddb0;
+  background: #17291f;
+  border-color: #315d44;
 }

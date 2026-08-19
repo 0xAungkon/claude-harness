@@ -159,6 +159,17 @@ async function run() {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
 
+  // Harness rewind summaries are stored as recovery context in the raw
+  // transcript, but the chat UI should show one concise marker rather than
+  // leaking the full synthetic context prompt or its acknowledgement.
+  const rewindSummaryTurns = parseJsonlText([
+    JSON.stringify({ role: 'user', content: '<claude-harness-rewind-summary>Changed API routing and tests.</claude-harness-rewind-summary>\nThis is recovered conversation context. Do not perform any task.' }),
+    JSON.stringify({ role: 'assistant', content: 'Context restored.' })
+  ].join('\n'));
+  assert.strictEqual(rewindSummaryTurns.length, 1);
+  assert.strictEqual(rewindSummaryTurns[0].role, 'assistant');
+  assert.strictEqual(rewindSummaryTurns[0].content, 'Summarized conversation');
+
   // @file index: hide dot-directories/files, honor .gitignore and search by
   // basename/path prefix without leaking ignored files into suggestions.
   const fileRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-harness-files-'));

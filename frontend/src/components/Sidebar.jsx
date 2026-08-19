@@ -39,7 +39,7 @@ function ContextMenu({ menu, onClose, onNewSession, onRename, onDelete, onFork }
   const top = Math.max(8, Math.min(menu.y, window.innerHeight - height - 8));
 
   const copyPath = async () => {
-    const path = menu.type === 'workspace' ? menu.workspace?.path : menu.session?.path;
+    const path = menu.type === 'workspace' ? menu.workspace?.path : (menu.workspace?.path || menu.session?.projectPath);
     try { if (path) await navigator.clipboard.writeText(path); } catch { /* ignore */ }
     onClose();
   };
@@ -226,7 +226,6 @@ function DeleteDialog({ session, onCancel, onConfirm }) {
             className={`rounded-lg bg-[#c6573a] px-3.5 py-2 text-[14px] font-medium text-white shadow-sm outline-none transition hover:bg-[#b74b30] disabled:cursor-not-allowed disabled:opacity-50 ${selectedAction === 'delete' ? 'ring-2 ring-[#d98f7b]/60 ring-offset-2' : ''}`}
           >{deleting ? 'Deleting…' : 'Delete'}</button>
         </div>
-        <div className="mt-3 text-center text-[11px] text-harness-muted">← → choose · Enter confirm · Esc cancel</div>
       </div>
     </div>
   );
